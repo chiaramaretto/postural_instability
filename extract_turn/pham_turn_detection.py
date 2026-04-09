@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from kielmat.utils import preprocessing
-import viz_utils as viz_utils
+from . import viz_utils
 from typing import Optional, Union, Tuple, List
 
 
