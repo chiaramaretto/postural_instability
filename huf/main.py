@@ -49,8 +49,13 @@ def main():
         
         model_dr.eval()
         with torch.no_grad():
-            _, feat = model_dr(full_data.to(device))
-            axis_features.append(feat.cpu())
+            # Creiamo un loader temporaneo per non saturare la VRAM
+            temp_loader = DataLoader(TensorDataset(full_data), batch_size=256, shuffle=False)
+            feats = []
+            for b in temp_loader:
+                out, f = model_dr(b[0].to(device))
+                feats.append(f.cpu()) # Spostiamo subito su CPU per liberare la GPU
+            axis_features.append(torch.cat(feats, dim=0))
 
     # 3. STEP 2: Local Feature Fusion (LFF-AE)
     # Fusing features from each sensor unit independently [cite: 41, 168]
