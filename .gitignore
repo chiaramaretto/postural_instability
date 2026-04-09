@@ -1,4 +1,7 @@
-/data/
+/data/cleaned_data/
+/data/original_data/
+/data/preprocessed_data/
 /__pycache__/
-/cleaned_data/
 /extract_turn/__pycache__/
+/extract_turn/__init__.py
+/autoencoder/checkpoint/*.pth
