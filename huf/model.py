@@ -30,8 +30,8 @@ class DR_SAE(nn.Module):
             if i > 0: x = self.selu(x)
         return x, latent
 
-class Hierarchical_AE(nn.Module):
-    def __init__(self, input_channels, c4_dim=64):
+class LFF_AE(nn.Module):
+    def __init__(self, input_channels=6 * 256, c4_dim=256):
         super().__init__()
         # Encoder
         self.conv1 = nn.Conv1d(input_channels, 512, kernel_size=3, padding=1)
@@ -54,7 +54,6 @@ class Hierarchical_AE(nn.Module):
     
     def forward(self, x):
         # --- ENCODER ---
-        # Salviamo le dimensioni originali prima del pooling
         size1 = x.size() 
         x = self.selu(self.conv1(x))
         x, idx1 = self.pool1(x)
@@ -70,7 +69,6 @@ class Hierarchical_AE(nn.Module):
         x = self.selu(self.deconv4(latent))
         x = self.selu(self.deconv3(x))
         
-        # Passiamo output_size per forzare la dimensione corretta
         x = self.unpool2(x, idx2, output_size=size2) 
         x = self.selu(self.deconv2(x))
         
@@ -80,10 +78,4 @@ class Hierarchical_AE(nn.Module):
         return recon, latent
     
 
-class LFF_AE(Hierarchical_AE):
-    def __init__(self, input_channels=6 * 256, c4_dim=256):
-        super().__init__(input_channels, c4_dim=c4_dim)
 
-class GFF_AE(Hierarchical_AE):
-    def __init__(self, input_channels=256, c4_dim=64):
-        super().__init__(input_channels, c4_dim=c4_dim)
