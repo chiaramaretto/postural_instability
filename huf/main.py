@@ -14,6 +14,7 @@ def main():
     ckpt_dir = "posturalInstability/huf/checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
 
+    # 1. Load data and metadata
     metadata = pd.read_csv("posturalInstability/data/windowed_data/metadata.csv")
     subjects = metadata['subjectID'].unique()
     np.random.shuffle(subjects)
@@ -23,7 +24,7 @@ def main():
     
     sensor_cols = ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']
 
-    # --- STEP 1: DR-SAE Training & Feature Extraction con Pooling ---
+    # --- STEP 1: DR-SAE Training & Feature Extraction to Disk ---
     for col in sensor_cols:
         ckpt_path = f"{ckpt_dir}/dr_sae_{col}.pth"
         feat_path = f"{ckpt_dir}/features_{col}.pt" 
@@ -52,10 +53,7 @@ def main():
                 feats_list = []
                 for b in temp_loader:
                     _, f = model_dr(b[0].to(device))
-                    # RIDUZIONE TEMPORALE: Passiamo da [Batch, 256, 256] a [Batch, 256, 1]
-                    # Questo riduce il peso del file di 256 volte!
-                    f_pooled = torch.mean(f, dim=2, keepdim=True) 
-                    feats_list.append(f_pooled.cpu())
+                    feats_list.append(f.cpu())
                 all_axis_feats = torch.cat(feats_list, dim=0)
                 torch.save(all_axis_feats, feat_path)
                 del feats_list, all_axis_feats 
@@ -64,19 +62,16 @@ def main():
         gc.collect()
         torch.cuda.empty_cache()
 
-    # --- STEP 2: Local Feature Fusion (LFF-AE) ---
+    # 2. STEP 2: Local Feature Fusion (LFF-AE) - FINAL FUSION
     ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
-    print("\nLoading axis features for LFF-AE (Memory Efficient)...")
     
+    print("\nLoading axis features for LFF-AE (In-place to save RAM)...")
     num_samples = len(metadata)
-    # Ora carichiamo feature compatte: [Campioni, 1536, 1]
-    lff_input_all = torch.empty((num_samples, 6 * 256, 1), dtype=torch.float32)
+    lff_input_all = torch.empty((num_samples, 6 * 256, 256), dtype=torch.float32) 
 
     for i, col in enumerate(sensor_cols):
         feat_path = f"{ckpt_dir}/features_{col}.pt"
-        axis_feat = torch.load(feat_path, map_location='cpu')
-        lff_input_all[:, i*256 : (i+1)*256, :] = axis_feat
-        del axis_feat
+        lff_input_all[:, i*256 : (i+1)*256] = torch.load(feat_path, map_location='cpu')
         gc.collect()
 
     model_lff = LFF_AE(input_channels=6*256).to(device)
@@ -85,16 +80,22 @@ def main():
         print("Loading checkpoint for LFF-AE")
         model_lff.load_state_dict(torch.load(ckpt_lff, map_location=device))
     else:
-        print("\n--- Training LFF-AE ---")
+        print("\n--- Training Local Feature Fusion (LFF-AE) ---")
+        
         from torch.utils.data import Subset
-        train_subset = Subset(TensorDataset(lff_input_all), train_indices)
+        full_dataset = TensorDataset(lff_input_all)
+        train_subset = Subset(full_dataset, train_indices)
+        
         lff_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
         model_lff = train_fusion_block(model_lff, lff_loader, device, block_name="LFF")
         torch.save(model_lff.state_dict(), ckpt_lff)
+        
+        # Pulizia post-training
         del train_subset, lff_loader
-
-    # --- FINAL EXTRACTION ---
-    print("\n--- Final features extraction ---")
+        gc.collect()
+    
+    # --- FINAL STEP: Extract features from LFF-AE ---
+    print("\n--- Final features extraction from LFF-AE ---")
     model_lff.eval()
     with torch.no_grad():
         lff_loader_full = DataLoader(TensorDataset(lff_input_all), batch_size=256, shuffle=False)
@@ -104,15 +105,18 @@ def main():
             final_list.append(lff_feat.cpu())
         
         final_features = torch.cat(final_list, dim=0)
+        
         del lff_input_all, final_list
         gc.collect()
-
-    # GAP finale per ottenere il vettore a 256 dimensioni
-    final_features_flat = torch.mean(final_features, dim=2).squeeze().numpy()
+        torch.cuda.empty_cache()
+    final_features_flat = torch.mean(final_features, dim=2).numpy()
     
+    # Concatenate metadata with the 256 extracted features
     df_results = pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1)
     df_results.to_csv("posturalInstability/data/extracted_huf_features.csv", index=False)
-    print("Done!")
+    
+    print(f"Extraction completed. Feature vector size: {final_features_flat.shape[1]}")
+    print("Results saved to: posturalInstability/data/extracted_huf_features.csv")
 
 if __name__ == "__main__":
     main()
