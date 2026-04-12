@@ -55,15 +55,18 @@ class LFF_AE(nn.Module):
     def forward(self, x):
         # --- ENCODER ---
         size1 = x.size() 
+        print("Input size:", size1)
         x = self.selu(self.conv1(x))
         x, idx1 = self.pool1(x)
         
         size2 = x.size()
+        print("Size after first pool:", size2)
         x = self.selu(self.conv2(x))
         x, idx2 = self.pool2(x)
         
         x = self.selu(self.bn3(self.conv3(x)))
         latent = self.selu(self.conv4(x))
+        print("Latent size:", latent.size())
 
         # --- DECODER ---
         x = self.selu(self.deconv4(latent))
