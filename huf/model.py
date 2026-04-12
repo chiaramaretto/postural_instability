@@ -35,9 +35,9 @@ class LFF_AE(nn.Module):
         super().__init__()
         # Encoder
         self.conv1 = nn.Conv1d(input_channels, 512, kernel_size=3, padding=1)
-        self.pool1 = nn.MaxPool1d(kernel_size=4, stride=2, padding=1)
+        self.pool1 = nn.MaxPool1d(kernel_size=4, stride=2, padding=1, return_indices=True)
         self.conv2 = nn.Conv1d(512, 256, kernel_size=3, padding=1)
-        self.pool2 = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
+        self.pool2 = nn.MaxPool1d(kernel_size=3, stride=2, padding=1, return_indices=True)
         self.conv3 = nn.Conv1d(256, 128, kernel_size=3, padding=1)
         self.bn3 = nn.BatchNorm1d(128)
         self.conv4 = nn.Conv1d(128, c4_dim, kernel_size=3, padding=1)
@@ -45,22 +45,22 @@ class LFF_AE(nn.Module):
         # Decoder
         self.deconv4 = nn.ConvTranspose1d(c4_dim, 128, kernel_size=3, padding=1)
         self.deconv3 = nn.ConvTranspose1d(128, 256, kernel_size=3, padding=1)
-        self.unpool2 = nn.Upsample(scale_factor=2, mode='linear', align_corners=False)
+        self.unpool2 = nn.MaxUnpool1d(kernel_size=3, stride=2, padding=1)
         self.deconv2 = nn.ConvTranspose1d(256, 512, kernel_size=3, padding=1)
-        self.unpool1 = nn.Upsample(scale_factor=2, mode='linear', align_corners=False)
+        self.unpool1 = nn.MaxUnpool1d(kernel_size=4, stride=2, padding=1)
         self.deconv1 = nn.ConvTranspose1d(512, input_channels, kernel_size=3, padding=1)
         
         self.selu = nn.SELU()
     
     def forward(self, x):
         # --- ENCODER ---
-        size1 = x.size(-1)
+        size1 = x.size() 
         x = self.selu(self.conv1(x))
-        x = self.pool1(x)
+        x, idx1 = self.pool1(x)
         
-        size2 = x.size(-1)
+        size2 = x.size()
         x = self.selu(self.conv2(x))
-        x = self.pool2(x)
+        x, idx2 = self.pool2(x)
         
         x = self.selu(self.bn3(self.conv3(x)))
         latent = self.selu(self.conv4(x))
@@ -69,14 +69,10 @@ class LFF_AE(nn.Module):
         x = self.selu(self.deconv4(latent))
         x = self.selu(self.deconv3(x))
         
-        x = self.unpool2(x)
-        if x.size(-1) != size2:
-            x = nn.functional.interpolate(x, size=size2, mode='linear', align_corners=False)
+        x = self.unpool2(x, idx2, output_size=size2) 
         x = self.selu(self.deconv2(x))
         
-        x = self.unpool1(x)
-        if x.size(-1) != size1:
-            x = nn.functional.interpolate(x, size=size1, mode='linear', align_corners=False)
+        x = self.unpool1(x, idx1, output_size=size1)
         recon = self.deconv1(x)
         
         return recon, latent

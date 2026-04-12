@@ -73,7 +73,6 @@ def main():
             self.feature_paths = feature_paths
             self.indices = indices if indices is not None else None
 
-            # Carichiamo SOLO i metadata (shape), non tutto
             sample = torch.load(feature_paths[0], map_location='cpu')
             self.length = sample.shape[0]
             del sample
@@ -86,23 +85,21 @@ def main():
 
             feats = []
             for p in self.feature_paths:
-                f = torch.load(p, map_location='cpu')  # carica singolo file
-                feats.append(f[real_idx])              # prende solo 1 sample
+                f = torch.load(p, map_location='cpu')  
+                feats.append(f[real_idx])              
                 del f
 
-            x = torch.cat(feats, dim=0)  # (6*256, 256)
+            x = torch.cat(feats, dim=0) 
             return x
 
 
-    # paths delle feature salvate
     feature_paths = [f"{ckpt_dir}/features_{col}.pt" for col in sensor_cols]
 
-    # dataset train (solo subset)
     train_dataset = LFFDataset(feature_paths, train_indices)
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=64,
+        batch_size=32,
         shuffle=True,
         num_workers=0,
         pin_memory=True
