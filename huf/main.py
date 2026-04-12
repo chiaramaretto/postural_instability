@@ -64,15 +64,49 @@ def main():
 
     # 2. STEP 2: Local Feature Fusion (LFF-AE) - FINAL FUSION
     ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
-    
-    print("\nLoading axis features for LFF-AE (In-place to save RAM)...")
-    num_samples = len(metadata)
-    lff_input_all = torch.empty((num_samples, 6 * 256, 256), dtype=torch.float32) 
 
-    for i, col in enumerate(sensor_cols):
-        feat_path = f"{ckpt_dir}/features_{col}.pt"
-        lff_input_all[:, i*256 : (i+1)*256] = torch.load(feat_path, map_location='cpu')
-        gc.collect()
+    print("\nPreparing lazy dataset for LFF-AE (memory efficient)...")
+
+    # --- Dataset custom ---
+    class LFFDataset(torch.utils.data.Dataset):
+        def __init__(self, feature_paths, indices=None):
+            self.feature_paths = feature_paths
+            self.indices = indices if indices is not None else None
+
+            # Carichiamo SOLO i metadata (shape), non tutto
+            sample = torch.load(feature_paths[0], map_location='cpu')
+            self.length = sample.shape[0]
+            del sample
+
+        def __len__(self):
+            return len(self.indices) if self.indices is not None else self.length
+
+        def __getitem__(self, idx):
+            real_idx = self.indices[idx] if self.indices is not None else idx
+
+            feats = []
+            for p in self.feature_paths:
+                f = torch.load(p, map_location='cpu')  # carica singolo file
+                feats.append(f[real_idx])              # prende solo 1 sample
+                del f
+
+            x = torch.cat(feats, dim=0)  # (6*256, 256)
+            return x
+
+
+    # paths delle feature salvate
+    feature_paths = [f"{ckpt_dir}/features_{col}.pt" for col in sensor_cols]
+
+    # dataset train (solo subset)
+    train_dataset = LFFDataset(feature_paths, train_indices)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=64,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=True
+    )
 
     model_lff = LFF_AE(input_channels=6*256).to(device)
 
@@ -82,18 +116,11 @@ def main():
     else:
         print("\n--- Training Local Feature Fusion (LFF-AE) ---")
         
-        from torch.utils.data import Subset
-        full_dataset = TensorDataset(lff_input_all)
-        train_subset = Subset(full_dataset, train_indices)
-        
-        lff_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
-        model_lff = train_fusion_block(model_lff, lff_loader, device, block_name="LFF")
+        model_lff = train_fusion_block(model_lff, train_loader, device, block_name="LFF")
         torch.save(model_lff.state_dict(), ckpt_lff)
-        
-        # Pulizia post-training
-        del train_subset, lff_loader
+
         gc.collect()
-    
+        
     # --- FINAL STEP: Extract features from LFF-AE ---
     print("\n--- Final features extraction from LFF-AE ---")
     model_lff.eval()
