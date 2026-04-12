@@ -84,7 +84,7 @@ def train_fusion_block(model, loader, device, lr=1e-3, block_name="Fusion"):
         model.train()
         running_loss = 0.0
         for batch in loader:
-            inputs = batch[0].to(device)
+            inputs = batch[0].to(device) if isinstance(batch, (list, tuple)) else batch.to(device)
             optimizer.zero_grad()
             
             reconstructed, _ = model(inputs)

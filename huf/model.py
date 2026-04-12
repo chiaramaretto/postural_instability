@@ -39,7 +39,7 @@ class LFF_AE(nn.Module):
         self.conv2 = nn.Conv1d(512, 256, kernel_size=3, padding=1)
         self.pool2 = nn.MaxPool1d(kernel_size=3, stride=2, padding=1, return_indices=True)
         self.conv3 = nn.Conv1d(256, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(self.conv3.out_channels)
         self.conv4 = nn.Conv1d(128, c4_dim, kernel_size=3, padding=1)
         
         # Decoder
@@ -54,30 +54,27 @@ class LFF_AE(nn.Module):
     
     def forward(self, x):
         # --- ENCODER ---
-        size1 = x.size() 
-        print("Input size:", size1)
         x = self.selu(self.conv1(x))
+        size1 = x.size()
         x, idx1 = self.pool1(x)
-        
-        size2 = x.size()
-        print("Size after first pool:", size2)
+
         x = self.selu(self.conv2(x))
+        size2 = x.size()
         x, idx2 = self.pool2(x)
-        
+
         x = self.selu(self.bn3(self.conv3(x)))
         latent = self.selu(self.conv4(x))
-        print("Latent size:", latent.size())
 
         # --- DECODER ---
         x = self.selu(self.deconv4(latent))
         x = self.selu(self.deconv3(x))
-        
-        x = self.unpool2(x, idx2, output_size=size2) 
+
+        x = self.unpool2(x, idx2, output_size=size2)
         x = self.selu(self.deconv2(x))
-        
+
         x = self.unpool1(x, idx1, output_size=size1)
         recon = self.deconv1(x)
-        
+
         return recon, latent
     
 
