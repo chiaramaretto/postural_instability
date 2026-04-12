@@ -96,7 +96,7 @@ def main():
     # --- STEP 2: Local Feature Fusion (LFF-AE) ---
     ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
     train_dataset = MmapLFFDataset(feature_paths, train_indices)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0 )
 
     model_lff = LFF_AE(input_channels=6*256).to(device)
 
@@ -114,7 +114,7 @@ def main():
     
     # Use full dataset (no indices) for extraction
     full_lff_dataset = MmapLFFDataset(feature_paths)
-    extract_loader = DataLoader(full_lff_dataset, batch_size=256, shuffle=False, num_workers=2)
+    extract_loader = DataLoader(full_lff_dataset, batch_size=256, shuffle=False, num_workers=0)
     
     final_list = []
     with torch.no_grad():
