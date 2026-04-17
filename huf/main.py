@@ -69,7 +69,7 @@ def main():
             else:
                 print(f"\n--- Training DR-SAE: {col} ---")
                 train_data = torch.from_numpy(raw_data[train_indices]).float()
-                train_loader = DataLoader(torch.utils.data.TensorDataset(train_data), batch_size=32, shuffle=True)
+                train_loader = DataLoader(torch.utils.data.TensorDataset(train_data), batch_size=16, shuffle=True)
                 model_dr = train_stacked_dr_sae(model_dr, train_loader, device)
                 torch.save(model_dr.state_dict(), ckpt_path)
                 del train_data
@@ -79,7 +79,7 @@ def main():
             raw_tensor = torch.from_numpy(raw_data).float()
             full_loader = DataLoader(
                 torch.utils.data.TensorDataset(raw_tensor),
-                batch_size=256,
+                batch_size=128,
                 shuffle=False,
                 pin_memory=(device.type == "cuda"),
             )
@@ -121,7 +121,7 @@ def main():
     # --- STEP 2: Local Feature Fusion (LFF-AE) ---
     ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
     train_dataset = MmapLFFDataset(feature_paths, train_indices)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0 )
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0 )
 
     
 
@@ -141,7 +141,7 @@ def main():
     
     # Use full dataset (no indices) for extraction
     full_lff_dataset = MmapLFFDataset(feature_paths)
-    extract_loader = DataLoader(full_lff_dataset, batch_size=256, shuffle=False, num_workers=0)
+    extract_loader = DataLoader(full_lff_dataset, batch_size=128, shuffle=False, num_workers=0)
     
     final_list = []
     with torch.no_grad():
