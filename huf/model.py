@@ -67,7 +67,7 @@ class LFF_AE(nn.Module):
 
         x = self.selu(self.bn3(self.conv3(x)))
         latent = self.selu(self.conv4(x))
-        print("latent shape", x.size())
+        print("latent shape", latent.size())
 
         # --- DECODER ---
         x = self.selu(self.deconv4(latent))
