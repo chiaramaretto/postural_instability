@@ -31,7 +31,7 @@ class DR_SAE(nn.Module):
         return x, latent
 
 class LFF_AE(nn.Module):
-    def __init__(self, input_channels=6 * 256, c4_dim=256):
+    def __init__(self, input_channels=6 * 256, c4_dim=64):
         super().__init__()
         # Encoder
         self.conv1 = nn.Conv1d(input_channels, 512, kernel_size=3, padding=1)

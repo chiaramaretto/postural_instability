@@ -98,6 +98,8 @@ def main():
     train_dataset = MmapLFFDataset(feature_paths, train_indices)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0 )
 
+    
+
     model_lff = LFF_AE(input_channels=6*256).to(device)
 
     if os.path.exists(ckpt_lff):

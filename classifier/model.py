@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 class PosturalInstabilityClassifier(nn.Module):
-    def __init__(self, input_size = 256, num_classes=5):
+    def __init__(self, input_size=256, num_classes=2):
         super(PosturalInstabilityClassifier, self).__init__()
         self.fc1 = nn.Linear(input_size, 128)
         self.relu1 = nn.ReLU()
@@ -15,5 +15,4 @@ class PosturalInstabilityClassifier(nn.Module):
         out = self.fc2(out)
         out = self.relu2(out)
         out = self.fc3(out)
-        out = self.softmax(out)
         return out
