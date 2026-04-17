@@ -1,4 +1,3 @@
-/data/cleaned_data/
 /data/original_data/
 /data/preprocessed_data/
 /__pycache__/
@@ -6,3 +5,4 @@
 /extract_turn/__init__.py
 /huf/checkpoints/
 /huf/__pycache__/
+/data/**/*sensor.csv
