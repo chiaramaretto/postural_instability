@@ -69,8 +69,21 @@ def main():
             else:
                 print(f"\n--- Training DR-SAE: {col} ---")
                 train_data = torch.from_numpy(raw_data[train_indices]).float()
-                train_loader = DataLoader(torch.utils.data.TensorDataset(train_data), batch_size=16, shuffle=True)
-                model_dr = train_stacked_dr_sae(model_dr, train_loader, device)
+                train_loader = DataLoader(
+                    torch.utils.data.TensorDataset(train_data),
+                    batch_size=16,
+                    shuffle=True,
+                    pin_memory=(device.type == "cuda"),
+                )
+                model_dr = train_stacked_dr_sae(
+                    model_dr,
+                    train_loader,
+                    device,
+                    min_epochs=5,
+                    max_epochs=40,
+                    target_loss=0.005,
+                    layer_batch_size=16,
+                )
                 torch.save(model_dr.state_dict(), ckpt_path)
                 del train_data
 

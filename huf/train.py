@@ -4,15 +4,25 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-def train_stacked_dr_sae(model, loader, device, lr=1e-3):
+def train_stacked_dr_sae(
+    model,
+    loader,
+    device,
+    lr=1e-3,
+    min_epochs=5,
+    max_epochs=100,
+    target_loss=0.005,
+    layer_batch_size=32,
+):
 
     model.to(device)
     criterion = nn.MSELoss()
     
-    current_input_data = []
-    for batch in loader:
-        current_input_data.append(batch[0])
-    current_input_data = torch.cat(current_input_data, dim=0)
+    if hasattr(loader.dataset, "tensors") and len(loader.dataset.tensors) > 0:
+        base_input_data = loader.dataset.tensors[0]
+    else:
+        cached_batches = [batch[0] for batch in loader]
+        base_input_data = torch.cat(cached_batches, dim=0)
 
     for i in range(len(model.enc_layers)):
         print(f"\n--- Training DR-SAE Layer {i+1}/5 ---")
@@ -23,10 +33,15 @@ def train_stacked_dr_sae(model, loader, device, lr=1e-3):
         # reset optimizer
         optimizer = optim.Adam(list(encoder_layer.parameters()) + list(decoder_layer.parameters()), lr=lr)
         
-        layer_loader = DataLoader(TensorDataset(current_input_data), batch_size=32, shuffle=True)
+        layer_loader = DataLoader(
+            TensorDataset(base_input_data),
+            batch_size=layer_batch_size,
+            shuffle=True,
+            pin_memory=(device.type == "cuda"),
+        )
         
         epoch = 0
-        pbar = tqdm(total=100, desc=f"Layer {i+1} Progress")
+        pbar = tqdm(total=max_epochs, desc=f"Layer {i+1} Progress")
         
         while True:
             epoch += 1
@@ -34,7 +49,13 @@ def train_stacked_dr_sae(model, loader, device, lr=1e-3):
             running_loss = 0.0
             
             for batch in layer_loader:
-                inputs = batch[0].to(device)
+                inputs = batch[0].to(device, non_blocking=(device.type == "cuda"))
+
+                if i > 0:
+                    with torch.no_grad():
+                        for j in range(i):
+                            inputs = model.selu(model.enc_layers[j](inputs))
+
                 optimizer.zero_grad()
                 
                 z = model.selu(encoder_layer(inputs))
@@ -47,26 +68,18 @@ def train_stacked_dr_sae(model, loader, device, lr=1e-3):
             
             avg_loss = running_loss / len(layer_loader)
             
+            pbar.update(1)
             pbar.set_postfix({"Epoch": epoch, "Loss": f"{avg_loss:.6f}"})
             
-            if epoch >= 5 and avg_loss < 0.005:
+            if epoch >= min_epochs and avg_loss < target_loss:
                 pbar.write(f"Layer {i+1}, Epoch: {epoch}, Loss: {avg_loss:.6f}")
                 pbar.close()
                 break
             
-            if epoch >= 100: 
+            if epoch >= max_epochs:
                 pbar.write(f"Layer {i+1} ha raggiunto il limite di salvaguardia (100 epoche).")
                 pbar.close()
                 break
-
-        model.eval()
-        with torch.no_grad():
-            new_inputs = []
-            eval_loader = DataLoader(TensorDataset(current_input_data), batch_size=64, shuffle=False)
-            for batch in eval_loader:
-                out = model.selu(encoder_layer(batch[0].to(device)))
-                new_inputs.append(out.cpu())
-            current_input_data = torch.cat(new_inputs, dim=0)
             
     return model
 
@@ -84,7 +97,7 @@ def train_fusion_block(model, loader, device, lr=1e-3, block_name="Fusion"):
         model.train()
         running_loss = 0.0
         for batch in loader:
-            inputs = batch[0].to(device) if isinstance(batch, (list, tuple)) else batch.to(device)
+            inputs = batch[0].to(device, non_blocking=(device.type == "cuda")) if isinstance(batch, (list, tuple)) else batch.to(device, non_blocking=(device.type == "cuda"))
             optimizer.zero_grad()
             
             reconstructed, _ = model(inputs)
@@ -97,6 +110,7 @@ def train_fusion_block(model, loader, device, lr=1e-3, block_name="Fusion"):
         avg_loss = running_loss / len(loader)
         epoch += 1
         
+        pbar.update(1)
         pbar.set_postfix({"Epoch": epoch, "Loss": f"{avg_loss:.6f}"})
         
         if epoch >= 5 and avg_loss < 0.005:
