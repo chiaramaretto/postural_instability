@@ -5,4 +5,5 @@
 /extract_turn/__init__.py
 /huf/checkpoints/
 /huf/__pycache__/
-/data/**/*sensor.csv
+/data/cleaned_data/
+classifier/__pycache__/
