@@ -23,7 +23,7 @@ def train_stacked_dr_sae(model, loader, device, lr=1e-3):
         # reset optimizer
         optimizer = optim.Adam(list(encoder_layer.parameters()) + list(decoder_layer.parameters()), lr=lr)
         
-        layer_loader = DataLoader(TensorDataset(current_input_data), batch_size=64, shuffle=True)
+        layer_loader = DataLoader(TensorDataset(current_input_data), batch_size=32, shuffle=True)
         
         epoch = 0
         pbar = tqdm(total=100, desc=f"Layer {i+1} Progress")
