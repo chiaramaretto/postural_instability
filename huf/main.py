@@ -69,25 +69,50 @@ def main():
             else:
                 print(f"\n--- Training DR-SAE: {col} ---")
                 train_data = torch.from_numpy(raw_data[train_indices]).float()
-                train_loader = DataLoader(torch.utils.data.TensorDataset(train_data), batch_size=64, shuffle=True)
+                train_loader = DataLoader(torch.utils.data.TensorDataset(train_data), batch_size=32, shuffle=True)
                 model_dr = train_stacked_dr_sae(model_dr, train_loader, device)
                 torch.save(model_dr.state_dict(), ckpt_path)
                 del train_data
 
             print(f"Extracting features for {col} to disk...")
             model_dr.eval()
-            all_feats = []
-            full_loader = DataLoader(torch.utils.data.TensorDataset(torch.from_numpy(raw_data).float()), batch_size=512)
-            
-            with torch.no_grad():
+            raw_tensor = torch.from_numpy(raw_data).float()
+            full_loader = DataLoader(
+                torch.utils.data.TensorDataset(raw_tensor),
+                batch_size=256,
+                shuffle=False,
+                pin_memory=(device.type == "cuda"),
+            )
+
+            # Stream features directly to disk to avoid RAM spikes from list + concatenate.
+            feature_mmap = None
+            write_pos = 0
+            with torch.inference_mode():
                 for b in full_loader:
-                    _, f = model_dr(b[0].to(device))
-                    all_feats.append(f.cpu().numpy())
-            
-            # Save as NumPy for memory mapping later
-            np.save(feat_path, np.concatenate(all_feats, axis=0))
-            
-            del raw_data, model_dr, all_feats
+                    x = b[0].to(device, non_blocking=(device.type == "cuda"))
+                    _, f = model_dr(x)
+                    f_np = f.detach().cpu().numpy()
+
+                    if feature_mmap is None:
+                        out_shape = (raw_data.shape[0],) + f_np.shape[1:]
+                        feature_mmap = np.lib.format.open_memmap(
+                            feat_path,
+                            mode="w+",
+                            dtype=f_np.dtype,
+                            shape=out_shape,
+                        )
+
+                    batch_n = f_np.shape[0]
+                    feature_mmap[write_pos:write_pos + batch_n] = f_np
+                    write_pos += batch_n
+
+                    del x, f, f_np
+
+            # Ensure file metadata is fully written.
+            if feature_mmap is not None:
+                feature_mmap.flush()
+
+            del raw_data, raw_tensor, model_dr, feature_mmap
             gc.collect()
             torch.cuda.empty_cache()
         else:
