@@ -6,4 +6,5 @@
 /huf/checkpoints/
 /huf/__pycache__/
 /data/cleaned_data/
+/data/extracted_features/
 /classifier/__pycache__/
