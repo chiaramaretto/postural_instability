@@ -8,3 +8,4 @@
 /data/cleaned_data/
 /data/extracted_features/
 /classifier/__pycache__/
+/architecture/__pycache__/
