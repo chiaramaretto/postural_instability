@@ -7,6 +7,34 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 from model import DR_SAE, LFF_AE
 from train import train_stacked_dr_sae, train_fusion_block
 
+
+def preprocess_axis_windows(raw_data, metadata, train_indices, axis_name):
+    """Apply stance detrending and train-fitted z-score normalization."""
+    data = raw_data.astype(np.float32, copy=True)
+
+    # Mean-center only in stance windows (task 0/1): acc_y/acc_z and all gyros.
+    stance_mask = metadata["taskID"].isin([0, 1]).to_numpy()
+    should_center = axis_name in {"acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"}
+    if should_center:
+        stance_idx = np.where(stance_mask)[0]
+        if stance_idx.size > 0:
+            data[stance_idx] = data[stance_idx] - data[stance_idx].mean(axis=1, keepdims=True)
+
+    # Fit normalization on train only, then apply to all splits.
+    train_values = data[train_indices].reshape(-1)
+    mean_train = float(train_values.mean())
+    std_train = float(train_values.std())
+    if std_train < 1e-8:
+        std_train = 1.0
+
+    data = (data - mean_train) / std_train
+    stats = {
+        "mean": mean_train,
+        "std": std_train,
+        "centered_in_stance": bool(should_center),
+    }
+    return data, stats
+
 class MmapLFFDataset(Dataset):
     def __init__(self, feature_paths, indices=None):
         self.feature_paths = [p.replace(".pt", ".npy") for p in feature_paths]
@@ -31,11 +59,14 @@ def main():
     
     sensor_cols = ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']
     feature_paths = [f"{ckpt_dir}/clinical_feat_{col}.npy" for col in sensor_cols]
+    preprocessing_stats = {}
 
     for col in sensor_cols:
         feat_path = f"{ckpt_dir}/clinical_feat_{col}.npy" 
         if not os.path.exists(feat_path):
             raw_data = np.load(f"posturalInstability/data/windowed_data/axes/{col}.npy")
+            raw_data, col_stats = preprocess_axis_windows(raw_data, metadata, train_indices, col)
+            preprocessing_stats[col] = col_stats
             model_dr = DR_SAE().to(device)
             model_dr = train_stacked_dr_sae(model_dr, DataLoader(TensorDataset(torch.from_numpy(raw_data[train_indices]).float()), batch_size=16, shuffle=True), device)
             
@@ -53,6 +84,12 @@ def main():
             feature_mmap.flush()
             del raw_data, model_dr
             gc.collect()
+
+    if preprocessing_stats:
+        stats_df = pd.DataFrame.from_dict(preprocessing_stats, orient="index")
+        stats_path = os.path.join(ckpt_dir, "preprocessing_stats.csv")
+        stats_df.to_csv(stats_path)
+        print(f"Saved preprocessing stats to: {stats_path}")
 
     # Fusion training (Input channels: 6 sensors * 32 clinical features)
     model_lff = LFF_AE(input_channels=6*32, c4_dim=32).to(device)
