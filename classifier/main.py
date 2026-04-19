@@ -11,7 +11,7 @@ from train import train_model
 def main():
     # Setup percorsi (usa percorsi relativi per Colab/Locale)
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    features_path = os.path.join(repo_root, 'data', 'extracted_features', 'features_5s_64.csv')
+    features_path = os.path.join(repo_root, 'data', 'extracted_features', 'clinicalfeatures_5s_32.csv')
     # extract number of features from the file name (assuming it's in the format features_{window}s_{num_features}.csv)
     num_features = int(re.search(r'features_\d+s_(\d+)\.csv', os.path.basename(features_path)).group(1))
     folder = os.path.join(repo_root, 'data', 'cleaned_data')
