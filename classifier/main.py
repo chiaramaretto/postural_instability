@@ -80,7 +80,7 @@ def main():
     model = train_model(X_train.values, y_train.values, 
                         class_weights=weights_tensor, 
                         input_size=X_train.shape[1], 
-                        num_classes=2, learning_rate=0.001, num_epochs=50)
+                        num_classes=2, learning_rate=0.0001, num_epochs=200)
 
     # Valutazione
     model.eval()

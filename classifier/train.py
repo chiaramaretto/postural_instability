@@ -15,7 +15,7 @@ def train_model(X_train, y_train, input_size=256, num_classes=2, class_weights=N
     
     # Se passiamo i pesi, la Loss darà più importanza alle classi meno numerose
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
     for epoch in tqdm.tqdm(range(num_epochs), desc="Training Binary Classifier"):
         model.train()
