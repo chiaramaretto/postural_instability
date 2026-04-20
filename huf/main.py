@@ -1,3 +1,5 @@
+import re
+
 import torch
 import numpy as np
 import pandas as pd
@@ -204,10 +206,21 @@ def main():
     
     # 3. Save Results
     df_results = pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1)
-    df_results.to_csv("posturalInstability/data/extracted_huf_features.csv", index=False)
+
+    # merge with clinical data
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    clinical_folder = os.path.join(root, 'data', 'cleaned_data')
+    clinical_data = pd.DataFrame()
+    for file in os.listdir(clinical_folder):
+        if file.endswith('clinical.csv') or file.endswith('clinical_data.csv'):
+            df = pd.read_csv(os.path.join(clinical_folder, file), dtype={'subjectID': str})
+            df['dataset'] = re.sub(r'_clinical(?:_data)?\.csv$', '', file)
+            clinical_data = pd.concat([clinical_data, df], ignore_index=True)
+
+    df_results = df_results.merge(clinical_data, on=['subjectID', 'dataset'], how='left')
+    df_results.to_csv("posturalInstability/data/features.csv", index=False)
     
-    print(f"Extraction completed. Feature vector size: {final_features_flat.shape[1]}")
-    print("Results saved to: posturalInstability/data/extracted_huf_features.csv")
+    print(f"Extraction completed.")
 
 if __name__ == "__main__":
     main()
