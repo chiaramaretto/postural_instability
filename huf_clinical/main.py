@@ -212,6 +212,7 @@ def main():
 
     # Step 2: LFF training
     ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
+    ckpt_lff_clinical = f"{ckpt_dir}/lff_ae_clinical.pth"
     train_dataset = MmapLFFDataset(feature_paths, train_indices)
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
 
@@ -226,18 +227,23 @@ def main():
         torch.save(model_lff.state_dict(), ckpt_lff)
 
     # Step 2B: Clinical-aware fine-tuning
-    train_clinical_dataset = MmapLFFClinicalDataset(feature_paths, targets=window_targets, indices=train_indices)
-    train_clinical_loader = DataLoader(train_clinical_dataset, batch_size=16, shuffle=True, num_workers=0)
-    model_lff = fine_tune_lff_clinical(
-        model_lff,
-        train_clinical_loader,
-        device,
-        alpha=0.2,
-        lr=5e-4,
-        max_epochs=20,
-        min_epochs=8,
-        patience=6,
-    )
+    if os.path.exists(ckpt_lff_clinical):
+        print("Loading checkpoint for Clinical-aware LFF")
+        model_lff.load_state_dict(torch.load(ckpt_lff_clinical, map_location=device))
+    else:
+        train_clinical_dataset = MmapLFFClinicalDataset(feature_paths, targets=window_targets, indices=train_indices)
+        train_clinical_loader = DataLoader(train_clinical_dataset, batch_size=16, shuffle=True, num_workers=0)
+        model_lff = fine_tune_lff_clinical(
+            model_lff,
+            train_clinical_loader,
+            device,
+            alpha=0.2,
+            lr=5e-4,
+            max_epochs=20,
+            min_epochs=8,
+            patience=6,
+        )
+        torch.save(model_lff.state_dict(), ckpt_lff_clinical)
 
     # Final feature extraction
     print("\n--- Final features extraction from clinical-aware LFF-AE ---")
