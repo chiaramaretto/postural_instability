@@ -10,3 +10,4 @@
 /classifier/__pycache__/
 /architecture/__pycache__/
 /attention/__pycache__/
+/attention/checkpoints/
