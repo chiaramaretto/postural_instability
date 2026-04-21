@@ -108,17 +108,26 @@ def main():
             final_list.append(torch.mean(lff_feat, dim=2).cpu()) # GAP per stabilità temporale
     
     final_features_flat = torch.cat(final_list, dim=0).numpy()
+    feature_df = pd.DataFrame(final_features_flat, index=metadata.index)
+    df_results = pd.concat([metadata.reset_index(drop=True), feature_df.reset_index(drop=True)], axis=1)
+
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     clinical_folder = os.path.join(root, 'data', 'cleaned_data')
-    clinical_data = pd.DataFrame()
+    clinical_parts = []
     for file in os.listdir(clinical_folder):
         if file.endswith('clinical.csv') or file.endswith('clinical_data.csv'):
-            df = pd.read_csv(os.path.join(clinical_folder, file), dtype={'subjectID': str})
+            df = pd.read_csv(os.path.join(clinical_folder, file), dtype={'subjectID': str}, low_memory=False)
+            df['subjectID'] = df['subjectID'].astype(str)
             df['dataset'] = re.sub(r'_clinical(?:_data)?\.csv$', '', file)
-            clinical_data = pd.concat([clinical_data, df], ignore_index=True)
+            clinical_parts.append(df)
 
-    df_results = df_results.merge(clinical_data, on=['subjectID', 'dataset'], how='left')
-    pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1).to_csv("posturalInstability/data/clinical_huf_features.csv", index=False)
-    print("✅ Clinical Features saved to: posturalInstability/data/clinical_huf_features.csv")
+    if clinical_parts:
+        clinical_data = pd.concat(clinical_parts, ignore_index=True)
+        clinical_data = clinical_data.groupby(['subjectID', 'dataset'], as_index=False).first()
+        df_results = df_results.merge(clinical_data, on=['subjectID', 'dataset'], how='left')
+
+    output_path = "posturalInstability/data/clinical_huf_features.csv"
+    df_results.to_csv(output_path, index=False)
+    print(f"Features saved to: {output_path}")
 
 if __name__ == "__main__": main()
