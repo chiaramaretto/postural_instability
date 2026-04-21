@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from model import PosturalInstabilityClassifier
 import tqdm
 
-def train_model(X_train, y_train, input_size=256, num_classes=2, class_weights=None, batch_size=32, num_epochs=100, learning_rate=0.005):
+def train_model(X_train, y_train, input_size=256, num_classes=4, class_weights=None, batch_size=32, num_epochs=100, learning_rate=0.005):
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.long)
 
