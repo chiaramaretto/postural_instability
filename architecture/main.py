@@ -1,3 +1,5 @@
+import re
+
 import torch
 import numpy as np
 import pandas as pd
@@ -106,6 +108,16 @@ def main():
             final_list.append(torch.mean(lff_feat, dim=2).cpu()) # GAP per stabilità temporale
     
     final_features_flat = torch.cat(final_list, dim=0).numpy()
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    clinical_folder = os.path.join(root, 'data', 'cleaned_data')
+    clinical_data = pd.DataFrame()
+    for file in os.listdir(clinical_folder):
+        if file.endswith('clinical.csv') or file.endswith('clinical_data.csv'):
+            df = pd.read_csv(os.path.join(clinical_folder, file), dtype={'subjectID': str})
+            df['dataset'] = re.sub(r'_clinical(?:_data)?\.csv$', '', file)
+            clinical_data = pd.concat([clinical_data, df], ignore_index=True)
+
+    df_results = df_results.merge(clinical_data, on=['subjectID', 'dataset'], how='left')
     pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1).to_csv("posturalInstability/data/clinical_huf_features.csv", index=False)
     print("✅ Clinical Features saved to: posturalInstability/data/clinical_huf_features.csv")
 
