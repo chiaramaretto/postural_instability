@@ -73,19 +73,18 @@ class MmapLFFClinicalDataset(MmapLFFDataset):
 
 def load_clinical_data(root):
     clinical_folder = os.path.join(root, "data", "cleaned_data")
-    clinical_parts = []
+    clinical_data = pd.DataFrame(columns=["subjectID", "dataset"])
 
     for file in os.listdir(clinical_folder):
         if file.endswith("clinical.csv") or file.endswith("clinical_data.csv"):
             df = pd.read_csv(os.path.join(clinical_folder, file), dtype={"subjectID": str}, low_memory=False)
             df["subjectID"] = df["subjectID"].astype(str)
-            df["dataset"] = re.sub(r"_clinical(?:_data)?\\.csv$", "", file)
-            clinical_parts.append(df)
+            df["dataset"] = re.sub(r"_clinical(?:_data)?\.csv$", "", file)
+            clinical_data = pd.concat([clinical_data, df], ignore_index=True)
 
-    if not clinical_parts:
+    if clinical_data.empty:
         return pd.DataFrame(columns=["subjectID", "dataset", "postural_stability"])
 
-    clinical_data = pd.concat(clinical_parts, ignore_index=True)
     clinical_data = clinical_data.groupby(["subjectID", "dataset"], as_index=False).first()
     return clinical_data
 
@@ -263,7 +262,9 @@ def main():
     df_results = pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1)
     df_results = df_results.merge(clinical_data, on=["subjectID", "dataset"], how="left")
 
-    output_path = "posturalInstability/data/features_clinical_aware.csv"
+    output_dir = os.path.join(root, "data", "extracted_features")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "features_clinical_aware.csv")
     df_results.to_csv(output_path, index=False)
     print(f"Clinical-aware extraction completed: {output_path}")
 

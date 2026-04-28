@@ -28,7 +28,7 @@ def main():
     
     # Setup paths
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    features_path = os.path.join(repo_root, 'data', 'extracted_features', 'features.csv')
+    features_path = os.path.join(repo_root, 'data', 'extracted_features', 'features_clinical.csv')
    
     print(f"\n[1/5] Loading features from: {features_path}")
     
