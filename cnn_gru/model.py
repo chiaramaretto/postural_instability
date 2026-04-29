@@ -1,70 +1,57 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-
-class GRUCNNEnsembleClassifier(nn.Module):
-    """Stacking ensemble: two 1D-CNN heads (kernel 1 and 3) and a GRU head.
-
-    Outputs logits for 5 classes.
-    """
-
-    def __init__(self, input_channels: int = 6, n_filters: int = 64, gru_hidden: int = 64, num_classes: int = 5, dropout: float = 0.5):
-        super().__init__()
+class CnnGru(nn.Module):
+    def __init__(self, input_channels=6, batch_size=32):
+        super(CnnGru, self).__init__()
         self.input_channels = input_channels
+        self.batch_size = batch_size
 
-        # 1D-CNN head kernel size 1
         self.cnn1 = nn.Sequential(
-            nn.Conv1d(in_channels=input_channels, out_channels=n_filters, kernel_size=1, padding=0),
+            nn.Conv1d(input_channels, 64, kernel_size=1, stride=1),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2),
-            nn.Flatten(),
+            nn.MaxPool1d(2),
+            nn.AdaptiveAvgPool1d(50),
+            nn.Flatten()
+        )
+        
+        self.cnn2 = nn.Sequential(
+            nn.Conv1d(input_channels, 64, kernel_size=3, padding=1, stride=1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.AdaptiveAvgPool1d(50),
+            nn.Flatten()
+        )
+        
+        self.gru = nn.GRU(
+            input_size=input_channels,
+            hidden_size=64,
+            num_layers=1,
+            batch_first=True
         )
 
-        # 1D-CNN head kernel size 3
-        self.cnn3 = nn.Sequential(
-            nn.Conv1d(in_channels=input_channels, out_channels=n_filters, kernel_size=3, padding=1),
+
+        self.dense_layer = nn.Sequential(
+            # Infer input features automatically at first forward pass.
+            nn.LazyLinear(100), 
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2),
-            nn.Flatten(),
+            nn.Dropout(0.5),      
+            nn.Linear(100, 5)     
         )
 
-        # Project raw channels to GRU input size (time-distributed GRU input)
-        self.project = nn.Conv1d(in_channels=input_channels, out_channels=n_filters, kernel_size=1)
-        self.gru = nn.GRU(input_size=n_filters, hidden_size=gru_hidden, batch_first=True)
+    def forward(self, x):
+        
+        # Conv1d expects (batch, channels, length)
+        x_cnn = x.transpose(1, 2)
+        c1 = self.cnn1(x_cnn)
+        c2 = self.cnn2(x_cnn)
 
-        # Apply adaptive pooling to keep CNN outputs fixed-size
-        self.cnn1_pool = nn.AdaptiveAvgPool1d(8)
-        self.cnn3_pool = nn.AdaptiveAvgPool1d(8)
+        # GRU expects (batch, time, channels) and returns (output, hidden_state)
+        _, hidden_state = self.gru(x)
+        g = hidden_state[-1]
 
-        fused_size = n_filters * 8 + n_filters * 8 + gru_hidden
-        self.meta = nn.Sequential(
-            nn.Linear(fused_size, 100),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(100, num_classes),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, seq_len, channels)
-        if x.ndim != 3:
-            raise ValueError("Expected 3D input (batch, seq_len, channels)")
-
-        # ensure (batch, channels, seq_len)
-        if x.shape[1] > x.shape[2]:
-            x_cf = x
-        else:
-            x_cf = x.permute(0, 2, 1)
-
-        # CNN heads operate on channels-first
-        p1 = self.cnn1_pool(x_cf).reshape(x_cf.size(0), -1)
-        p3 = self.cnn3_pool(x_cf).reshape(x_cf.size(0), -1)
-
-        # GRU head
-        proj = self.project(x_cf)  # (batch, n_filters, seq_len)
-        proj = proj.permute(0, 2, 1)  # (batch, seq_len, n_filters)
-        _, h = self.gru(proj)
-        gru_feat = h[-1]
-
-        fused = torch.cat([p1, p3, gru_feat], dim=1)
-        logits = self.meta(fused)
+        x = torch.cat((c1, c2, g), dim=1)
+        logits = self.dense_layer(x)
         return logits
+     

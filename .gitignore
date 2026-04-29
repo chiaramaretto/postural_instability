@@ -11,3 +11,6 @@
 /architecture/__pycache__/
 /attention/__pycache__/
 /attention/checkpoints/
+cnn_gru/checkpoints/
+cnn_gru/__pycache__/
+cnn_gru/data/
