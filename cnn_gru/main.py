@@ -23,55 +23,6 @@ def print_confusion_matrix_by_dataset(y_true, y_pred, datasets, class_labels):
         print(cm)
 
 
-def oversample(windows, labels, target_count=800, k_neighbors=3):
-
-    unique_labels = np.unique(labels)
-    new_windows = []
-    new_labels = []
-    
-    rng = np.random.default_rng(42)
-
-    for label in unique_labels:
-        idx = np.where(labels == label)[0]
-        cls_windows = windows[idx]
-        
-        # Se la classe ha già abbastanza campioni, la usiamo così com'è 
-        # o facciamo un leggero downsampling se vogliamo pareggiare a target_count
-        if len(cls_windows) >= target_count:
-            chosen_idx = rng.choice(idx, size=target_count, replace=False)
-            new_windows.append(windows[chosen_idx])
-            new_labels.append(labels[chosen_idx])
-            continue
-
-        new_windows.append(cls_windows) # Teniamo gli originali
-        new_labels.append(labels[idx])
-        
-        flat_windows = cls_windows.reshape(len(cls_windows), -1)
-        nn = NearestNeighbors(n_neighbors=min(k_neighbors + 1, len(cls_windows)), metric="euclidean")
-        nn.fit(flat_windows)
-        knns = nn.kneighbors(flat_windows, return_distance=False)
-
-        synth_windows = []
-        num_to_add = target_count - len(cls_windows)
-        
-        for _ in range(num_to_add):
-
-            i = rng.integers(0, len(cls_windows))
-            neighbor_idx = rng.choice(knns[i][1:]) # Escludiamo se stesso
-            
-            # Interpolazione lineare (SMOTE): crea una finestra "in mezzo" alle due
-            alpha = rng.random()
-            synthetic_sample = cls_windows[i] + alpha * (cls_windows[neighbor_idx] - cls_windows[i])
-            
-            # Aggiungiamo un leggero Jittering (rumore) come suggerito per la robustezza
-            noise = rng.normal(0, 0.001, synthetic_sample.shape)
-            synth_windows.append(synthetic_sample + noise)
-            
-        new_windows.append(np.stack(synth_windows))
-        new_labels.append(np.full(num_to_add, label))
-
-    return np.concatenate(new_windows), np.concatenate(new_labels)
-
 def main():
     windows = np.load("posturalInstability/cnn_gru/data/windowed_data/windows.npy")
     labels = np.load("posturalInstability/cnn_gru/data/windowed_data/labels.npy")
@@ -83,7 +34,7 @@ def main():
     for u, c in zip(unique, counts):    
         print(f"Class {u}: {c} samples")
 
-    X_train_raw, X_test, y_train_raw, y_test, meta_train, meta_test = train_test_split(
+    X_train, X_test, y_train, y_test, meta_train, meta_test = train_test_split(
         windows,
         labels,
         metadata,
@@ -92,7 +43,6 @@ def main():
         stratify=labels
     )
 
-    X_train, y_train = oversample(X_train_raw, y_train_raw, target_count=800)
 
     # print class distribution after oversampling
     unique, counts = np.unique(y_train, return_counts=True)
