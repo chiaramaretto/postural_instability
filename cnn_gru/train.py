@@ -4,8 +4,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import tqdm
 import os
+from sklearn.metrics import confusion_matrix
 
-def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=100, val_fraction=0.2):
+def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, val_fraction=0.2, patience=20):
     os.makedirs('posturalInstability/cnn_gru/data/models', exist_ok=True)
     X_train = torch.as_tensor(X_train, dtype=torch.float32)
     y_train = torch.as_tensor(y_train, dtype=torch.long)
@@ -26,6 +27,8 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=100, va
     criterion = nn.CrossEntropyLoss()
     
     best_acc = 0
+    epochs_without_improvement = 0
+    best_state_dict = None
     for epoch in range(max_epochs):
         model.train()
         pbar = tqdm.tqdm(train_loader, desc=f"Epoch {epoch+1}/{max_epochs}")
@@ -56,6 +59,38 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=100, va
         print(f"Epoch {epoch+1}/{max_epochs}, Validation Accuracy: {acc:.4f}")
         if acc > best_acc:
             best_acc = acc
-            torch.save(model.state_dict(), 'posturalInstability/cnn_gru/data/models/best_stacking_model.pt')
+            best_state_dict = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            torch.save(best_state_dict, 'posturalInstability/cnn_gru/data/models/best_stacking_model.pt')
             pbar.set_postfix({"Best Acc": best_acc})
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs (patience={patience}).")
+            break
+
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
     return model, best_acc
+
+
+def predict(model, X, device, batch_size=32):
+    X = torch.as_tensor(X, dtype=torch.float32)
+    loader = DataLoader(TensorDataset(X), batch_size=batch_size, shuffle=False)
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for (x,) in loader:
+            x = x.to(device)
+            outputs = model(x)
+            _, predicted = torch.max(outputs.data, 1)
+            predictions.append(predicted.cpu())
+    return torch.cat(predictions).numpy()
+
+
+def print_confusion_matrix(y_true, y_pred, labels=None):
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    print("Final confusion matrix:")
+    print(cm)
+    return cm

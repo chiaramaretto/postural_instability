@@ -2,8 +2,9 @@ import torch
 import numpy as np
 import pandas as pd
 from model import CnnGru
-from train import fit_model
+from train import fit_model, predict, print_confusion_matrix
 from sklearn.neighbors import NearestNeighbors
+from sklearn.model_selection import train_test_split
 
 
 def oversample(windows, labels, target_count=800, k_neighbors=3):
@@ -65,7 +66,15 @@ def main():
     for u, c in zip(unique, counts):    
         print(f"Class {u}: {c} samples")
 
-    X_train, y_train = oversample(windows, labels, target_count=800)
+    X_train_raw, X_test, y_train_raw, y_test = train_test_split(
+        windows,
+        labels,
+        test_size=0.2,
+        random_state=42,
+        stratify=labels
+    )
+
+    X_train, y_train = oversample(X_train_raw, y_train_raw, target_count=800)
 
     # print class distribution after oversampling
     unique, counts = np.unique(y_train, return_counts=True)
@@ -77,8 +86,12 @@ def main():
     model = CnnGru(input_channels=6).to(device)
     
     # 4. Fit
-    m, acc = fit_model(model, X_train, y_train, device, batch_size=32)
+    m, acc = fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, patience=20)
     print(f"Best validation accuracy: {acc:.4f}")
+
+    # Final test evaluation
+    y_pred = predict(m, X_test, device, batch_size=32)
+    print_confusion_matrix(y_test, y_pred, labels=np.unique(labels))
 
 if __name__ == "__main__":
     main()
