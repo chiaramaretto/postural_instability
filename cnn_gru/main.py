@@ -103,6 +103,19 @@ def main():
     X_train, y_train, meta_train = windows[train_idx], labels[train_idx], metadata.iloc[train_idx].reset_index(drop=True)
     X_val, y_val, meta_val = windows[val_idx], labels[val_idx], metadata.iloc[val_idx].reset_index(drop=True)
     X_test, y_test, meta_test = windows[test_idx], labels[test_idx], metadata.iloc[test_idx].reset_index(drop=True)
+
+    # Keep original training labels to compute class weights before augmentation.
+    y_train_original = y_train.copy()
+
+    # Train-only z-score normalization (applied before oversampling).
+    # This avoids creating synthetic windows from mixed scales across datasets/devices.
+    train_mean = X_train.mean(axis=(0, 1), keepdims=True)
+    train_std = X_train.std(axis=(0, 1), keepdims=True)
+    train_std = np.where(train_std < 1e-6, 1.0, train_std)
+
+    X_train = (X_train - train_mean) / train_std
+    X_val = (X_val - train_mean) / train_std
+    X_test = (X_test - train_mean) / train_std
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = CnnGru(input_channels=6).to(device)
@@ -113,7 +126,9 @@ def main():
         if len(unique_labels) == 0:
             return windows_arr, labels_arr, metadata_df
 
-        target_count = int(counts.max())
+        # Avoid fully equalizing to the majority count to reduce synthetic overfit.
+        target_count = int(np.ceil(np.quantile(counts, 0.75)))
+        target_count = max(target_count, int(counts.min()))
         balanced_windows = []
         balanced_labels = []
         balanced_metadata = []
@@ -193,8 +208,32 @@ def main():
     y_train = y_train[perm]
     meta_train = meta_train.iloc[perm].reset_index(drop=True)
 
+    n_classes = int(np.max(labels)) + 1
+    train_counts = np.bincount(y_train_original, minlength=n_classes)
+    class_weights = np.zeros(n_classes, dtype=np.float32)
+    nonzero_mask = train_counts > 0
+    if np.any(nonzero_mask):
+        class_weights[nonzero_mask] = train_counts[nonzero_mask].sum() / (n_classes * train_counts[nonzero_mask])
+        class_weights[nonzero_mask] /= class_weights[nonzero_mask].mean()
+        class_weights[nonzero_mask] = np.clip(class_weights[nonzero_mask], 0.5, 10.0)
+
+    print(f"Original train class counts: {train_counts.tolist()}")
+    print(f"Weighted CE class weights: {np.round(class_weights, 3).tolist()}")
+
     # 4. Fit (provide explicit validation set)
-    m, acc, history = fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, patience=20, X_val=X_val, y_val=y_val)
+    m, acc, history = fit_model(
+        model,
+        X_train,
+        y_train,
+        device,
+        batch_size=32,
+        max_epochs=500,
+        patience=20,
+        X_val=X_val,
+        y_val=y_val,
+        class_weights=class_weights,
+        lr=5e-4,
+    )
     print(f"Best validation accuracy: {acc:.4f}")
 
     # Final test evaluation
@@ -228,13 +267,28 @@ def main():
         spec_per_class.append(spec)
     specificity = float(np.mean(spec_per_class))
 
-    # AUC (macro)
+    # AUC (macro) on classes present in test targets
     try:
-        auc = roc_auc_score(np.eye(np.max(y_test) + 1)[y_test], probs, average='macro', multi_class='ovo')
+        present_test_classes = np.unique(y_test)
+        if len(present_test_classes) < 2:
+            auc = np.nan
+        elif len(present_test_classes) == 2:
+            positive_class = int(present_test_classes[1])
+            y_bin = (y_test == positive_class).astype(np.int64)
+            auc = roc_auc_score(y_bin, probs[:, positive_class])
+        else:
+            auc = roc_auc_score(
+                y_test,
+                probs[:, present_test_classes],
+                average='macro',
+                multi_class='ovo',
+                labels=present_test_classes,
+            )
     except Exception:
-        auc = 0.0
+        auc = np.nan
 
-    print(f"Test metrics - Acc: {acc_test:.4f}, F1: {f1:.4f}, Precision: {precision:.4f}, Recall (sens): {recall:.4f}, Specificity: {specificity:.4f}, AUC: {auc:.4f}")
+    auc_str = f"{auc:.4f}" if not np.isnan(auc) else "nan"
+    print(f"Test metrics - Acc: {acc_test:.4f}, F1: {f1:.4f}, Precision: {precision:.4f}, Recall (sens): {recall:.4f}, Specificity: {specificity:.4f}, AUC: {auc_str}")
 
     # Save and plot training/validation loss
     os.makedirs('posturalInstability/cnn_gru/data/plots', exist_ok=True)

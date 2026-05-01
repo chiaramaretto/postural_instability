@@ -2,9 +2,9 @@ import os
 import gc
 import re
 
+import torch
 import numpy as np
 import pandas as pd
-import torch
 from torch.utils.data import DataLoader, Dataset
 
 from model import DR_SAE, LFF_AE
@@ -157,7 +157,7 @@ def main():
                 model_dr.load_state_dict(torch.load(ckpt_path, map_location=device))
             else:
                 print(f"\n--- Training DR-SAE: {col} ---")
-                train_data = torch.from_numpy(raw_data[train_indices]).float()
+                train_data = torch.from_numpy(raw_data[train_indices]).float().unsqueeze(1)  # [n_samples, 1, timesteps]
                 train_loader = DataLoader(
                     torch.utils.data.TensorDataset(train_data),
                     batch_size=16,
@@ -178,7 +178,7 @@ def main():
 
             print(f"Extracting features for {col} to disk...")
             model_dr.eval()
-            raw_tensor = torch.from_numpy(raw_data).float()
+            raw_tensor = torch.from_numpy(raw_data).float().unsqueeze(1)  # [n_samples, 1, timesteps]
             full_loader = DataLoader(
                 torch.utils.data.TensorDataset(raw_tensor),
                 batch_size=128,

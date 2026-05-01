@@ -10,6 +10,7 @@ class CnnGru(nn.Module):
 
         self.cnn1 = nn.Sequential(
             nn.Conv1d(input_channels, 64, kernel_size=1, stride=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.AdaptiveAvgPool1d(50),
@@ -18,6 +19,7 @@ class CnnGru(nn.Module):
         
         self.cnn2 = nn.Sequential(
             nn.Conv1d(input_channels, 64, kernel_size=3, padding=1, stride=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.AdaptiveAvgPool1d(50),
@@ -47,9 +49,9 @@ class CnnGru(nn.Module):
         c1 = self.cnn1(x_cnn)
         c2 = self.cnn2(x_cnn)
 
-        # GRU expects (batch, time, channels) and returns (output, hidden_state)
-        _, hidden_state = self.gru(x)
-        g = hidden_state[-1]
+        # GRU expects (batch, time, channels); use temporal mean to keep richer sequence info.
+        gru_out, _ = self.gru(x)
+        g = gru_out.mean(dim=1)
 
         x = torch.cat((c1, c2, g), dim=1)
         logits = self.dense_layer(x)

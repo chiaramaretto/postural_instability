@@ -1,13 +1,3 @@
-"""
-Preprocessing pipeline for huf_clinical data.
-- Loads cleaned sensor data from posturalInstability/data/cleaned_data/
-- Performs signal processing (lowpass, resample, outlier removal)
-- Creates sliding windows
-- Applies subject-level train/val/test split (no window mixing per subject)
-- Applies augmentation ONLY on training set to prevent leakage
-- Saves windowed data, labels, and metadata to posturalInstability/huf_clinical/data/windowed_data/
-"""
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt

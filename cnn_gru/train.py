@@ -7,7 +7,20 @@ import tqdm
 import os
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 
-def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, val_fraction=0.2, patience=20, X_val=None, y_val=None):
+def fit_model(
+    model,
+    X_train,
+    y_train,
+    device,
+    batch_size=32,
+    max_epochs=500,
+    val_fraction=0.2,
+    patience=20,
+    X_val=None,
+    y_val=None,
+    class_weights=None,
+    lr=5e-4,
+):
     os.makedirs('posturalInstability/cnn_gru/data/models', exist_ok=True)
     X_train = torch.as_tensor(X_train, dtype=torch.float32)
     y_train = torch.as_tensor(y_train, dtype=torch.long)
@@ -29,8 +42,12 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, va
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    if class_weights is not None:
+        cw = torch.as_tensor(class_weights, dtype=torch.float32, device=device)
+        criterion = nn.CrossEntropyLoss(weight=cw)
+    else:
+        criterion = nn.CrossEntropyLoss()
     
     best_acc = 0
     epochs_without_improvement = 0
@@ -56,6 +73,7 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, va
             outputs = model(x)
             loss = criterion(outputs, y)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_losses.append(loss.item())
 
@@ -105,9 +123,26 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, va
 
         # AUC (macro) if possible
         try:
-            auc = roc_auc_score(np.eye(np.max(all_targets) + 1)[all_targets], np.array(all_probs), average='macro', multi_class='ovo')
+            probs_arr = np.array(all_probs)
+            targets_arr = np.array(all_targets)
+            present_classes = np.unique(targets_arr)
+
+            if len(present_classes) < 2:
+                auc = np.nan
+            elif len(present_classes) == 2:
+                cls0, cls1 = int(present_classes[0]), int(present_classes[1])
+                y_bin = (targets_arr == cls1).astype(np.int64)
+                auc = roc_auc_score(y_bin, probs_arr[:, cls1])
+            else:
+                auc = roc_auc_score(
+                    targets_arr,
+                    probs_arr[:, present_classes],
+                    average='macro',
+                    multi_class='ovo',
+                    labels=present_classes,
+                )
         except Exception:
-            auc = 0.0
+            auc = np.nan
 
         history['train_loss'].append(avg_train_loss)
         history['val_loss'].append(avg_val_loss)
@@ -117,7 +152,8 @@ def fit_model(model, X_train, y_train, device, batch_size=32, max_epochs=500, va
         history['val_recall'].append(recall)
         history['val_auc'].append(auc)
 
-        print(f"Epoch {epoch+1}/{max_epochs}, Train Loss: {avg_train_loss:.4f}, Val Acc: {acc:.4f}, Val F1: {f1:.4f}, Val AUC: {auc:.4f}")
+        auc_str = f"{auc:.4f}" if not np.isnan(auc) else "nan"
+        print(f"Epoch {epoch+1}/{max_epochs}, Train Loss: {avg_train_loss:.4f}, Val Acc: {acc:.4f}, Val F1: {f1:.4f}, Val AUC: {auc_str}")
 
         if acc > best_acc:
             best_acc = acc
