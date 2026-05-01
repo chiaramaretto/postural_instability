@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import tqdm
 import os
