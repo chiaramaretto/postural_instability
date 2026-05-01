@@ -109,30 +109,45 @@ def main():
     ckpt_dir = "posturalInstability/huf_clinical/checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    metadata = pd.read_csv("posturalInstability/data/windowed_data/metadata.csv", low_memory=False)
+    # Load train/val/test data from huf_clinical split
+    data_dir = "posturalInstability/huf_clinical/data/windowed_data"
+    X_train = np.load(f"{data_dir}/train/windows.npy")
+    y_train = np.load(f"{data_dir}/train/labels.npy")
+    meta_train = pd.read_csv(f"{data_dir}/train/metadata.csv", low_memory=False)
+    
+    X_val = np.load(f"{data_dir}/val/windows.npy") if os.path.exists(f"{data_dir}/val/windows.npy") else np.array([])
+    y_val = np.load(f"{data_dir}/val/labels.npy") if os.path.exists(f"{data_dir}/val/labels.npy") else np.array([])
+    meta_val = pd.read_csv(f"{data_dir}/val/metadata.csv", low_memory=False) if os.path.exists(f"{data_dir}/val/metadata.csv") else pd.DataFrame()
+    
+    X_test = np.load(f"{data_dir}/test/windows.npy") if os.path.exists(f"{data_dir}/test/windows.npy") else np.array([])
+    y_test = np.load(f"{data_dir}/test/labels.npy") if os.path.exists(f"{data_dir}/test/labels.npy") else np.array([])
+    meta_test = pd.read_csv(f"{data_dir}/test/metadata.csv", low_memory=False) if os.path.exists(f"{data_dir}/test/metadata.csv") else pd.DataFrame()
+    
+    # Combine all for preprocessing statistics (train indices are 0:len(X_train))
+    X_all = np.concatenate([X_train, X_val, X_test], axis=0)
+    metadata = pd.concat([meta_train, meta_val, meta_test], ignore_index=True)
     metadata["subjectID"] = metadata["subjectID"].astype(str)
     metadata["dataset"] = metadata["dataset"].astype(str)
-
-    subjects = metadata["subjectID"].unique()
-    np.random.shuffle(subjects)
-    train_subjects = subjects[: int(0.7 * len(subjects))]
-    train_indices = metadata[metadata["subjectID"].isin(train_subjects)].index.tolist()
+    window_targets = np.concatenate([y_train, y_val, y_test], axis=0).astype(np.float32)
+    
+    # Train indices for normalization statistics
+    train_indices = np.arange(len(X_train))
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     clinical_data = load_clinical_data(root)
-    window_targets = build_window_targets(metadata, clinical_data, target_col="postural_stability")
 
     sensor_cols = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
     feature_paths = [f"{ckpt_dir}/features_{col}.npy" for col in sensor_cols]
     preprocessing_stats = {}
 
     # Step 1: DR-SAE training and feature extraction per axis
-    for col in sensor_cols:
+    for axis_idx, col in enumerate(sensor_cols):
         ckpt_path = f"{ckpt_dir}/dr_sae_{col}.pth"
         feat_path = f"{ckpt_dir}/features_{col}.npy"
 
         if not os.path.exists(feat_path):
-            raw_data = np.load(f"posturalInstability/data/windowed_data/axes/{col}.npy")
+            # Extract axis data from X_all windows (windows shape: [n_windows, n_timepoints, 6])
+            raw_data = X_all[:, :, axis_idx].copy().astype(np.float32)
             raw_data, col_stats = preprocess_axis_windows(raw_data, metadata, train_indices, col)
             preprocessing_stats[col] = col_stats
 

@@ -10,11 +10,11 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.model_selection import train_test_split
 
 
-def confusion_matrix(y_true, y_pred, datasets, class_labels):
+def print_confusion_matrix_by_dataset(y_true, y_pred, datasets, class_labels):
     datasets = np.asarray(datasets)
     unique_datasets = pd.Series(datasets).dropna().unique()
 
-    print("\nConfusion matrix:")
+    print("\nConfusion matrix per dataset:")
     for dataset in unique_datasets:
         mask = datasets == dataset
         if not np.any(mask):
@@ -210,7 +210,7 @@ def main():
 
     labels_unique = np.unique(labels)
 
-    confusion_matrix(y_test, y_pred, meta_test["dataset"].to_numpy(), labels_unique)
+    print_confusion_matrix_by_dataset(y_test, y_pred, meta_test["dataset"].to_numpy(), labels_unique)
 
     # Metrics
     acc_test = accuracy_score(y_test, y_pred)
