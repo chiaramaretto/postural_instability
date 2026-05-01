@@ -25,6 +25,65 @@ def print_confusion_matrix_by_dataset(y_true, y_pred, datasets, class_labels):
         print(cm)
 
 
+def oversample_dataset_subset(windows_arr, labels_arr, metadata_df, k_neighbors=3):
+    labels_arr = np.asarray(labels_arr)
+    unique_labels = np.unique(labels_arr)
+    if len(unique_labels) == 0:
+        return windows_arr, labels_arr, metadata_df
+
+    target_count = 500  # Fixed resampling target per class
+    balanced_windows = []
+    balanced_labels = []
+    balanced_metadata = []
+
+    for label in unique_labels:
+        idx = np.where(labels_arr == label)[0]
+        cls_windows = windows_arr[idx]
+        cls_metadata = metadata_df.iloc[idx].reset_index(drop=True)
+
+        if len(cls_windows) >= target_count:
+            chosen_idx = np.random.default_rng(42).choice(len(cls_windows), size=target_count, replace=False)
+            balanced_windows.append(cls_windows[chosen_idx])
+            balanced_labels.append(np.full(target_count, label, dtype=np.int64))
+            balanced_metadata.append(cls_metadata.iloc[chosen_idx].reset_index(drop=True))
+            continue
+
+        flat_windows = cls_windows.reshape(len(cls_windows), -1)
+        nn = NearestNeighbors(n_neighbors=min(k_neighbors + 1, len(cls_windows)), metric="euclidean")
+        nn.fit(flat_windows)
+        knns = nn.kneighbors(flat_windows, return_distance=False)
+
+        synth_windows = []
+        synth_metadata = []
+        num_to_add = target_count - len(cls_windows)
+        rng = np.random.default_rng(42)
+
+        for _ in range(num_to_add):
+            i = rng.integers(0, len(cls_windows))
+            neighbor_candidates = knns[i][1:]
+            if len(neighbor_candidates) == 0:
+                neighbor_idx = i
+            else:
+                neighbor_idx = rng.choice(neighbor_candidates)
+
+            alpha = rng.random()
+            synthetic_sample = cls_windows[i] + alpha * (cls_windows[neighbor_idx] - cls_windows[i])
+            noise = rng.normal(0, 0.001, synthetic_sample.shape)
+            synth_windows.append(synthetic_sample + noise)
+            synth_metadata.append(cls_metadata.iloc[i].to_dict())
+
+        balanced_windows.append(np.concatenate([cls_windows, np.stack(synth_windows)]))
+        balanced_labels.append(np.full(target_count, label, dtype=np.int64))
+        balanced_metadata.append(pd.concat([cls_metadata, pd.DataFrame(synth_metadata)], ignore_index=True))
+
+    return (
+        np.concatenate(balanced_windows),
+        np.concatenate(balanced_labels),
+        pd.concat(balanced_metadata, ignore_index=True),
+    )
+
+
+
 def main():
     windows = np.load("posturalInstability/cnn_gru/data/windowed_data/windows.npy")
     labels = np.load("posturalInstability/cnn_gru/data/windowed_data/labels.npy")
@@ -46,55 +105,55 @@ def main():
     for key in unique_subjects:
         idxs = subj_to_idx[key]
         vals = labels[idxs]
-        # use the mode; if tie, take first
-        vals_nonzero = vals
-        if len(vals_nonzero) == 0:
+        if len(vals) == 0:
             subj_labels.append(0)
         else:
-            subj_labels.append(int(pd.Series(vals_nonzero).mode().iloc[0]))
+            subj_labels.append(int(pd.Series(vals).mode().iloc[0]))
 
-    # Split subjects into train+temp and test. Use stratification if every subject-level class
-    # has at least 2 members; otherwise fall back to a non-stratified split.
-    subj_label_counts = pd.Series(subj_labels).value_counts()
-    if (subj_label_counts < 2).any() or len(unique_subjects) < 2:
-        print("Warning: some subject-level classes have <2 members; using non-stratified subject split.")
-        train_subj, test_subj = train_test_split(
-            unique_subjects,
-            test_size=0.2,
-            random_state=42,
-        )
-    else:
-        train_subj, test_subj = train_test_split(
-            unique_subjects,
-            test_size=0.2,
-            random_state=42,
-            stratify=subj_labels
-        )
-
-    # Split train_subj into train and val (val ~= 0.1 overall)
-    # compute stratify labels for train_subj and fallback if needed
-    train_subj_labels = [subj_labels[unique_subjects.index(s)] for s in train_subj]
-    train_label_counts = pd.Series(train_subj_labels).value_counts()
-    if (train_label_counts < 2).any() or len(train_subj) < 2:
-        print("Warning: some labels within the training subjects have <2 members; using non-stratified train/val subject split.")
-        train_subj_final, val_subj = train_test_split(
-            train_subj,
-            test_size=0.125,
-            random_state=42,
-        )
-    else:
-        train_subj_final, val_subj = train_test_split(
-            train_subj,
-            test_size=0.125,  # 0.125 of 0.8 ~= 0.1 overall
-            random_state=42,
-            stratify=train_subj_labels
-        )
-
-    # Build index lists
-    train_idx = [i for s in train_subj_final for i in subj_to_idx[s]]
-    val_idx = [i for s in val_subj for i in subj_to_idx[s]]
-    test_idx = [i for s in test_subj for i in subj_to_idx[s]]
-
+    # ===== NEW: STRATIFIED SPLIT PER CLASS TO GUARANTEE REPRESENTATION =====
+    # Split each class separately to ensure all classes appear in train/val/test
+    unique_classes = np.unique(labels)
+    train_idx = []
+    val_idx = []
+    test_idx = []
+    
+    print(f"\nStratified split per class (aiming for train/val/test representation):")
+    for class_label in unique_classes:
+        # Find all subjects belonging to this class
+        class_subjects = [
+            s for s in unique_subjects 
+            if subj_labels[unique_subjects.index(s)] == class_label
+        ]
+        
+        if len(class_subjects) == 0:
+            continue
+        elif len(class_subjects) == 1:
+            # Single subject for this class → add to training
+            print(f"  Class {class_label}: 1 subject → train only")
+            for idx in subj_to_idx[class_subjects[0]]:
+                train_idx.append(idx)
+        else:
+            # Multiple subjects: split 60% train, 15% val, 25% test
+            train_s, temp_s = train_test_split(
+                class_subjects, test_size=0.4, random_state=42
+            )
+            val_s, test_s = train_test_split(
+                temp_s, test_size=0.625, random_state=42  # 0.625 of 0.4 = 0.25 overall
+            )
+            
+            for s in train_s:
+                for idx in subj_to_idx[s]:
+                    train_idx.append(idx)
+            for s in val_s:
+                for idx in subj_to_idx[s]:
+                    val_idx.append(idx)
+            for s in test_s:
+                for idx in subj_to_idx[s]:
+                    test_idx.append(idx)
+            
+            print(f"  Class {class_label}: {len(class_subjects)} subjects → "
+                  f"train: {len(train_s)}, val: {len(val_s)}, test: {len(test_s)}")
+    
     # Preserve original ordering of windows within each split
     train_idx = sorted(train_idx)
     val_idx = sorted(val_idx)
@@ -119,66 +178,7 @@ def main():
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = CnnGru(input_channels=6).to(device)
-    # Define augmentation / balancing function (used only on training set)
-    def oversample_dataset_subset(windows_arr, labels_arr, metadata_df, k_neighbors=3):
-        labels_arr = np.asarray(labels_arr)
-        unique_labels, counts = np.unique(labels_arr, return_counts=True)
-        if len(unique_labels) == 0:
-            return windows_arr, labels_arr, metadata_df
-
-        # Avoid fully equalizing to the majority count to reduce synthetic overfit.
-        target_count = int(np.ceil(np.quantile(counts, 0.75)))
-        target_count = max(target_count, int(counts.min()))
-        balanced_windows = []
-        balanced_labels = []
-        balanced_metadata = []
-
-        for label in unique_labels:
-            idx = np.where(labels_arr == label)[0]
-            cls_windows = windows_arr[idx]
-            cls_metadata = metadata_df.iloc[idx].reset_index(drop=True)
-
-            if len(cls_windows) >= target_count:
-                chosen_idx = np.random.default_rng(42).choice(len(cls_windows), size=target_count, replace=False)
-                balanced_windows.append(cls_windows[chosen_idx])
-                balanced_labels.append(np.full(target_count, label, dtype=np.int64))
-                balanced_metadata.append(cls_metadata.iloc[chosen_idx].reset_index(drop=True))
-                continue
-
-            flat_windows = cls_windows.reshape(len(cls_windows), -1)
-            nn = NearestNeighbors(n_neighbors=min(k_neighbors + 1, len(cls_windows)), metric="euclidean")
-            nn.fit(flat_windows)
-            knns = nn.kneighbors(flat_windows, return_distance=False)
-
-            synth_windows = []
-            synth_metadata = []
-            num_to_add = target_count - len(cls_windows)
-            rng = np.random.default_rng(42)
-
-            for _ in range(num_to_add):
-                i = rng.integers(0, len(cls_windows))
-                neighbor_candidates = knns[i][1:]
-                if len(neighbor_candidates) == 0:
-                    neighbor_idx = i
-                else:
-                    neighbor_idx = rng.choice(neighbor_candidates)
-
-                alpha = rng.random()
-                synthetic_sample = cls_windows[i] + alpha * (cls_windows[neighbor_idx] - cls_windows[i])
-                noise = rng.normal(0, 0.001, synthetic_sample.shape)
-                synth_windows.append(synthetic_sample + noise)
-                synth_metadata.append(cls_metadata.iloc[i].to_dict())
-
-            balanced_windows.append(np.concatenate([cls_windows, np.stack(synth_windows)]))
-            balanced_labels.append(np.full(target_count, label, dtype=np.int64))
-            balanced_metadata.append(pd.concat([cls_metadata, pd.DataFrame(synth_metadata)], ignore_index=True))
-
-        return (
-            np.concatenate(balanced_windows),
-            np.concatenate(balanced_labels),
-            pd.concat(balanced_metadata, ignore_index=True),
-        )
-
+   
     # Apply dataset-wise balancing/augmentation only on the training set
     aug_windows = []
     aug_labels = []
@@ -218,6 +218,7 @@ def main():
         class_weights[nonzero_mask] = np.clip(class_weights[nonzero_mask], 0.5, 10.0)
 
     print(f"Original train class counts: {train_counts.tolist()}")
+    print(f"Train counts after augmentation: {np.bincount(y_train, minlength=n_classes).tolist()}")
     print(f"Weighted CE class weights: {np.round(class_weights, 3).tolist()}")
 
     # 4. Fit (provide explicit validation set)
