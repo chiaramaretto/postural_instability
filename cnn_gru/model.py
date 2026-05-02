@@ -3,9 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class CnnGru(nn.Module):
-    def __init__(self, input_channels=6, batch_size=32):
+    def __init__(self, input_channels=6, num_classes=5, batch_size=32):
         super(CnnGru, self).__init__()
         self.input_channels = input_channels
+        self.num_classes = num_classes
         self.batch_size = batch_size
 
         self.cnn1 = nn.Sequential(
@@ -39,7 +40,7 @@ class CnnGru(nn.Module):
             nn.LazyLinear(100), 
             nn.ReLU(),
             nn.Dropout(0.5),      
-            nn.Linear(100, 5)     
+            nn.Linear(100, num_classes)     
         )
 
     def forward(self, x):

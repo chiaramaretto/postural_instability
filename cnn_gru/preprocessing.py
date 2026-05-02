@@ -212,7 +212,7 @@ if not all_dfs:
 full_df = pd.concat(all_dfs, ignore_index=True)
 
 print("Create windows...")
-X_raw, metadata = create_windows(full_df, window_size=target_hz*5, overlap=0.75)
+X_raw, metadata = create_windows(full_df, window_size=target_hz*10, overlap=0.1)
 n_windows, w_size, n_channels = X_raw.shape
 X_flat = X_raw.reshape(-1, n_channels)
 X_final = X_flat.reshape(n_windows, w_size, n_channels)

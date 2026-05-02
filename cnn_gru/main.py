@@ -89,6 +89,10 @@ def main():
     labels = np.load("posturalInstability/cnn_gru/data/windowed_data/labels.npy")
     metadata = pd.read_csv("posturalInstability/cnn_gru/data/windowed_data/metadata.csv")
 
+    # Merge class 4 into class 3 (only 1 subject in class 4, merge to ensure representation)
+    labels = np.where(labels == 4, 3, labels)
+    print("Class 4 merged into class 3. Remaining classes: 0, 1, 2, 3")
+
     # Build subject keys (dataset, subjectID) so the same subject doesn't appear across splits
     subject_keys = metadata.apply(lambda r: (r['dataset'], str(r['subjectID']).strip()), axis=1)
     metadata = metadata.reset_index(drop=True)
@@ -177,7 +181,7 @@ def main():
     X_test = (X_test - train_mean) / train_std
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = CnnGru(input_channels=6).to(device)
+    model = CnnGru(input_channels=6, num_classes=4).to(device)
    
     # Apply dataset-wise balancing/augmentation only on the training set
     aug_windows = []
@@ -208,7 +212,7 @@ def main():
     y_train = y_train[perm]
     meta_train = meta_train.iloc[perm].reset_index(drop=True)
 
-    n_classes = int(np.max(labels)) + 1
+    n_classes = int(np.max(y_train)) + 1
     train_counts = np.bincount(y_train_original, minlength=n_classes)
     class_weights = np.zeros(n_classes, dtype=np.float32)
     nonzero_mask = train_counts > 0
