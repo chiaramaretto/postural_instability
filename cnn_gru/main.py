@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 
 # Paper configuration
 TASK_CONFIG = {
-    "static": {"batch_size": 16, "lr": 1e-4}, # Task 0 + 1
-    2: {"batch_size": 16, "lr": 1e-4},        # Task 2
+    "static": {"batch_size": 32, "lr": 1e-4}, # Task 0 + 1
+    2: {"batch_size": 64, "lr": 1e-4},        # Task 2
 }
 
 def SMOTE_augmentation(X, y, target_count=200, k_neighbors=2):
