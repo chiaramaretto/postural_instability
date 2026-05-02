@@ -7,7 +7,7 @@ def fit_model(
     X_train,
     y_train,
     device_name, 
-    batch_size=16,
+    batch_size=32,
     max_epochs=100,
     val_fraction=0.2,
     patience=20,

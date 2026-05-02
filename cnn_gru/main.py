@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 
 # Paper configuration
 TASK_CONFIG = {
-    "static": {"batch_size": 32, "lr": 1e-4}, # Task 0 + 1
-    2: {"batch_size": 64, "lr": 1e-4},        # Task 2
+    "static": {"batch_size": 32, "lr": 5e-4}, # Task 0 + 1
+    2: {"batch_size": 64, "lr": 5e-4},        # Task 2
 }
 
 def SMOTE_augmentation(X, y, target_count=200, k_neighbors=2):
@@ -215,7 +215,7 @@ def run_experiment(name, X_task, y_task, meta_task):
 
         model, _, _ = fit_model(
             model, X_train, y_train, device_name,
-            batch_size=config["batch_size"], max_epochs=500, patience=20,
+            batch_size=config["batch_size"], max_epochs=100, patience=20,
             X_val=X_test, y_val=y_test, lr=config["lr"]
         )
 
