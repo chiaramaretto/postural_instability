@@ -14,3 +14,6 @@
 cnn_gru/checkpoints/
 cnn_gru/__pycache__/
 cnn_gru/data/
+autoencoder/checkpoints/
+autoencoder/__pycache__/
+huf_clinical/__pycache__/
