@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os
 from sklearn.metrics import confusion_matrix
+
 def fit_model(
     model,
     X_train,
@@ -36,9 +37,10 @@ def fit_model(
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
             monitor='val_accuracy', 
-            patience=patience, 
+            patience=max(25, patience),
             restore_best_weights=True,
-            verbose=1
+            verbose=1,
+            min_delta=0.0001
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=model_path,
@@ -74,8 +76,8 @@ def fit_model(
         'val_accuracy': history_obj.history['val_accuracy'],
     }
 
-    # Nota: Keras non calcola F1/AUC per ogni epoca di default nel modo esatto di sklearn, 
-    # ma i pesi migliori sono già stati ripristinati dall'EarlyStopping.
+    if X_val is not None and y_val is not None:
+        print_confusion_matrix(y_val, model.predict(X_val).argmax(axis=1))
     
     return model, max(history['val_accuracy']), history
 

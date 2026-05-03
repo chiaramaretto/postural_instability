@@ -9,8 +9,11 @@ from sklearn.model_selection import train_test_split
 # Configuration
 sf_dict = {"fog_star": 60.0, "omnia_park": 90.0, "pd_phone": 200.0, "wearpd": 100.0, "kiel": 200.0}
 datasets = ["fog_star", "omnia_park", "pd_phone", "wearpd", "kiel"]
+sensor_cols = ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']
 target_hz = 128.0  # Target sampling rate for huf_clinical
 all_dfs = []
+base_output_dir = "posturalInstability/huf_clinical/data/windowed_data"
+channels_output_dir = os.path.join(base_output_dir, "channels")
 
 
 def enforce_nan_policy(group, sf, max_interp_gap_sec=0.2, sensor_cols=None):
@@ -190,8 +193,6 @@ def oversample_dataset_subset(windows_arr, labels_arr, metadata_df, k_neighbors=
 # MAIN PREPROCESSING PIPELINE
 # ============================================================================
 
-sensor_cols = ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']
-
 # Step 1: Load and preprocess data per dataset
 for dataset in datasets:
     path = f"posturalInstability/data/cleaned_data/{dataset}_sensor.csv"
@@ -299,7 +300,8 @@ num_total = len(labels)
 num_labeled = int(has_label_mask.sum())
 print(f"Total windows: {num_total}, labeled windows: {num_labeled}")
 
-os.makedirs("posturalInstability/huf_clinical/data/windowed_data", exist_ok=True)
+os.makedirs(base_output_dir, exist_ok=True)
+os.makedirs(channels_output_dir, exist_ok=True)
 
 if num_labeled == 0:
     print("Warning: no labeled windows found.")
@@ -397,21 +399,27 @@ else:
     meta_train = meta_train.iloc[perm].reset_index(drop=True)
 
     # Step 6: Save split data
-    os.makedirs("posturalInstability/huf_clinical/data/windowed_data/train", exist_ok=True)
-    os.makedirs("posturalInstability/huf_clinical/data/windowed_data/val", exist_ok=True)
-    os.makedirs("posturalInstability/huf_clinical/data/windowed_data/test", exist_ok=True)
+    for split_name in ["train", "val", "test"]:
+        os.makedirs(os.path.join(base_output_dir, split_name), exist_ok=True)
+        os.makedirs(os.path.join(channels_output_dir, split_name), exist_ok=True)
 
-    np.save("posturalInstability/huf_clinical/data/windowed_data/train/windows.npy", X_train.astype(np.float32))
-    np.save("posturalInstability/huf_clinical/data/windowed_data/train/labels.npy", y_train)
-    meta_train.to_csv("posturalInstability/huf_clinical/data/windowed_data/train/metadata.csv", index=False)
+    def save_split(split_name, X_split, y_split, meta_split):
+        split_dir = os.path.join(base_output_dir, split_name)
+        np.save(os.path.join(split_dir, "windows.npy"), X_split.astype(np.float32))
+        np.save(os.path.join(split_dir, "labels.npy"), y_split)
+        meta_split.to_csv(os.path.join(split_dir, "metadata.csv"), index=False)
 
-    np.save("posturalInstability/huf_clinical/data/windowed_data/val/windows.npy", X_val.astype(np.float32))
-    np.save("posturalInstability/huf_clinical/data/windowed_data/val/labels.npy", y_val)
-    meta_val.to_csv("posturalInstability/huf_clinical/data/windowed_data/val/metadata.csv", index=False)
+        channel_dir = os.path.join(channels_output_dir, split_name)
+        for channel_idx, channel_name in enumerate(sensor_cols):
+            np.save(os.path.join(channel_dir, f"{channel_name}.npy"), X_split[:, :, channel_idx].astype(np.float32))
 
-    np.save("posturalInstability/huf_clinical/data/windowed_data/test/windows.npy", X_test.astype(np.float32))
-    np.save("posturalInstability/huf_clinical/data/windowed_data/test/labels.npy", y_test)
-    meta_test.to_csv("posturalInstability/huf_clinical/data/windowed_data/test/metadata.csv", index=False)
+    save_split("train", X_train, y_train, meta_train)
+    save_split("val", X_val, y_val, meta_val)
+    save_split("test", X_test, y_test, meta_test)
+
+    np.save(os.path.join(base_output_dir, "windows.npy"), X_final.astype(np.float32))
+    np.save(os.path.join(base_output_dir, "labels.npy"), labels)
+    metadata.to_csv(os.path.join(base_output_dir, "metadata.csv"), index=False)
 
     print(f"\nPreprocessing complete!")
     print(f"Train: {len(y_train)} windows ({len(np.unique(y_train))} classes)")

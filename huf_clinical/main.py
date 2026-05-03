@@ -106,11 +106,17 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    ckpt_dir = "posturalInstability/huf_clinical/checkpoints"
-    os.makedirs(ckpt_dir, exist_ok=True)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(root, "data", "windowed_data")
+    checkpoint_dir = os.path.join(data_dir, "checkpoints")
+    feature_dir = os.path.join(data_dir, "features")
+    extracted_dir = os.path.join(data_dir, "extracted_features")
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(feature_dir, exist_ok=True)
+    os.makedirs(extracted_dir, exist_ok=True)
 
     # Load train/val/test data from huf_clinical split
-    data_dir = "posturalInstability/huf_clinical/data/windowed_data"
     X_train = np.load(f"{data_dir}/train/windows.npy")
     y_train = np.load(f"{data_dir}/train/labels.npy")
     meta_train = pd.read_csv(f"{data_dir}/train/metadata.csv", low_memory=False)
@@ -133,17 +139,16 @@ def main():
     # Train indices for normalization statistics
     train_indices = np.arange(len(X_train))
 
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     clinical_data = load_clinical_data(root)
 
     sensor_cols = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
-    feature_paths = [f"{ckpt_dir}/features_{col}.npy" for col in sensor_cols]
+    feature_paths = [os.path.join(feature_dir, f"features_{col}.npy") for col in sensor_cols]
     preprocessing_stats = {}
 
     # Step 1: DR-SAE training and feature extraction per axis
     for axis_idx, col in enumerate(sensor_cols):
-        ckpt_path = f"{ckpt_dir}/dr_sae_{col}.pth"
-        feat_path = f"{ckpt_dir}/features_{col}.npy"
+        ckpt_path = os.path.join(checkpoint_dir, f"dr_sae_{col}.pth")
+        feat_path = os.path.join(feature_dir, f"features_{col}.npy")
 
         if not os.path.exists(feat_path):
             # Extract axis data from X_all windows (windows shape: [n_windows, n_timepoints, 6])
@@ -220,13 +225,13 @@ def main():
 
     if preprocessing_stats:
         stats_df = pd.DataFrame.from_dict(preprocessing_stats, orient="index")
-        stats_path = os.path.join(ckpt_dir, "preprocessing_stats.csv")
+        stats_path = os.path.join(extracted_dir, "preprocessing_stats.csv")
         stats_df.to_csv(stats_path)
         print(f"Saved preprocessing stats to: {stats_path}")
 
     # Step 2: LFF training
-    ckpt_lff = f"{ckpt_dir}/lff_ae.pth"
-    ckpt_lff_clinical = f"{ckpt_dir}/lff_ae_clinical.pth"
+    ckpt_lff = os.path.join(checkpoint_dir, "lff_ae.pth")
+    ckpt_lff_clinical = os.path.join(checkpoint_dir, "lff_ae_clinical.pth")
     train_dataset = MmapLFFDataset(feature_paths, train_indices)
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
 
@@ -277,11 +282,29 @@ def main():
     df_results = pd.concat([metadata, pd.DataFrame(final_features_flat)], axis=1)
     df_results = df_results.merge(clinical_data, on=["subjectID", "dataset"], how="left")
 
-    output_dir = os.path.join(root, "data", "extracted_features")
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "features_clinical_aware.csv")
-    df_results.to_csv(output_path, index=False)
-    print(f"Clinical-aware extraction completed: {output_path}")
+    if "postural_stability_y" in df_results.columns:
+        df_results["postural_stability"] = df_results["postural_stability_y"]
+    elif "postural_stability_x" in df_results.columns:
+        df_results["postural_stability"] = df_results["postural_stability_x"]
+    elif "postural_stability" not in df_results.columns and "label" in df_results.columns:
+        df_results["postural_stability"] = df_results["label"]
+
+    combined_output_path = os.path.join(extracted_dir, "features_clinical_aware.csv")
+    df_results.to_csv(combined_output_path, index=False)
+
+    split_map = {
+        "train": np.arange(0, len(X_train)),
+        "val": np.arange(len(X_train), len(X_train) + len(X_val)),
+        "test": np.arange(len(X_train) + len(X_val), len(X_train) + len(X_val) + len(X_test)),
+    }
+    for split_name, split_indices in split_map.items():
+        split_dir = os.path.join(extracted_dir, split_name)
+        os.makedirs(split_dir, exist_ok=True)
+        split_df = df_results.iloc[split_indices].reset_index(drop=True)
+        split_csv_path = os.path.join(split_dir, "features_clinical_aware.csv")
+        split_df.to_csv(split_csv_path, index=False)
+
+    print(f"Clinical-aware extraction completed: {combined_output_path}")
 
 
 if __name__ == "__main__":
