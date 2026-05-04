@@ -13,24 +13,46 @@ BASE_DATA_PATH = "posturalInstability/huf_clinical/data/windowed_data"
 CHANNELS_PATH = os.path.join(BASE_DATA_PATH, "channels")
 EXTRACTED_DIR = "posturalInstability/huf_clinical/data/extracted_features"
 CHECKPOINT_DIR = "posturalInstability/huf_clinical/data/checkpoints"
-FEATURE_DIR = "posturalInstability/huf_clinical/data/axis_features"
+STAC_FEATURE_CACHE_DIR = "posturalInstability/huf_clinical/data/stac_feature_cache"
 
 SENSOR_COLS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
 BATCH_SIZE = 64  # Aumentato per ridurre overhead
 CHUNK_SIZE = 256  # Per processing in blocchi
 FORCE_EXTRACT = False  # Imposta True per forzare re-estrazione features anche se in cache
 
+
+def is_valid_npy_cache(file_path):
+    """Verifica che un file .npy esista ed sia leggibile come mmap."""
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return False
+
+    try:
+        np.load(file_path, mmap_mode='r')
+        return True
+    except Exception:
+        return False
+
+
+def save_npy_atomic(file_path, array):
+    """Salva un .npy in modo atomico per evitare file parziali/corrotti."""
+    temp_path = f"{file_path}.tmp"
+    with open(temp_path, "wb") as handle:
+        np.save(handle, array)
+    os.replace(temp_path, file_path)
+
 def load_fusion_data_mmap(split):
-    """Carica le 6 feature DR-SAE via mmap (no copia in RAM)."""
+    """Carica le feature DR-SAE già estratte via mmap (non i dati grezzi)."""
     feats = []
     for col in SENSOR_COLS:
-        feat_path = os.path.join(FEATURE_DIR, f"{split}_{col}_feat.npy")
+        feat_path = os.path.join(STAC_FEATURE_CACHE_DIR, f"{split}_{col}_feat.npy")
+        if not is_valid_npy_cache(feat_path):
+            raise FileNotFoundError(f"Cache features non valida o mancante: {feat_path}")
         feats.append(np.load(feat_path, mmap_mode='r'))
-    return feats  # Ritorna liste di mmap, non concatenato
+    return feats
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    for d in [CHECKPOINT_DIR, FEATURE_DIR, EXTRACTED_DIR]:
+    for d in [CHECKPOINT_DIR, STAC_FEATURE_CACHE_DIR, EXTRACTED_DIR]:
         os.makedirs(d, exist_ok=True)
 
     # =========================================================================
@@ -68,10 +90,10 @@ def main():
             if not os.path.exists(split_axis_path):
                 continue
             
-            out_feat_path = os.path.join(FEATURE_DIR, f"{split}_{col}_feat.npy")
+            out_feat_path = os.path.join(STAC_FEATURE_CACHE_DIR, f"{split}_{col}_feat.npy")
             
             # Cache: salta estrazione se già presente (a meno che FORCE_EXTRACT=True)
-            if os.path.exists(out_feat_path) and not FORCE_EXTRACT:
+            if is_valid_npy_cache(out_feat_path) and not FORCE_EXTRACT:
                 print(f"  ✓ Features già estratte: {split}_{col}")
                 continue
             
@@ -93,7 +115,7 @@ def main():
                     del chunk_t, feat
             
             # Salva e libera
-            np.save(out_feat_path, np.concatenate(all_feats, axis=0))
+            save_npy_atomic(out_feat_path, np.concatenate(all_feats, axis=0))
             del all_feats, split_data_mmap
             gc.collect()
         
@@ -186,7 +208,7 @@ def main():
         n_samples = len(feat_mmaps[0])
         
         # Verifica che le features siano disponibili
-        all_feats_exist = all(os.path.exists(os.path.join(FEATURE_DIR, f"{split}_{col}_feat.npy")) 
+        all_feats_exist = all(os.path.exists(os.path.join(STAC_FEATURE_CACHE_DIR, f"{split}_{col}_feat.npy")) 
                               for col in SENSOR_COLS)
         if all_feats_exist:
             print(f"  ✓ Riutilizzo features dal cache")
