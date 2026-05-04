@@ -1,259 +1,159 @@
-import tensorflow as tf
+from model import CnnGruModel
+from train import train_cnn_lstm_pretrainer
+import os
 import numpy as np
 import pandas as pd
-import os
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import label_binarize
-from model import BagCnnGru
-from train import fit_model, predict
-import warnings
 import matplotlib.pyplot as plt
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from sklearn.utils.class_weight import compute_sample_weight
 
-warnings.filterwarnings("ignore")
-
-# Paper configuration
-TASK_CONFIG = {
-    "static": {"batch_size": 32, "lr": 5e-4}, # Task 0 + 1
-    2: {"batch_size": 32, "lr": 5e-4},        # Task 2
-}
-
-MAX_EPOCHS = 120
-EARLY_STOPPING_PATIENCE = 15
+# Import moduli locali (Assicurati che i file siano nella stessa cartella)
 
 
-def load_windowed_data(data_path):
-    bundle_path = os.path.join(data_path, "windowed_data_bundle.npz")
-    if os.path.exists(bundle_path):
-        bundle = np.load(bundle_path, allow_pickle=True)
-        windows = bundle["windows"]
-        labels = bundle["labels"]
-        metadata = pd.DataFrame.from_records(bundle["metadata"])
-        return windows, labels, metadata
+# Configurazione Percorsi
+DATA_PATH = "posturalInstability/cnn_gru/data/"
+CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/best_cnn_lstm.keras"
+RANDOM_STATE = 42
 
-    windows = np.load(os.path.join(data_path, "windows.npy"))
-    labels = np.load(os.path.join(data_path, "labels.npy"))
-    metadata = pd.read_csv(os.path.join(data_path, "metadata.csv"))
+def load_data():
+    """Carica finestre, etichette e metadati."""
+    windows = np.load(os.path.join(DATA_PATH, "windows.npy"))
+    labels = np.load(os.path.join(DATA_PATH, "labels.npy"))
+    metadata = pd.read_csv(os.path.join(DATA_PATH, "metadata.csv"))
+    
+    # Unifica Classe 4 (Molto Grave) nella Classe 3
+    labels = np.where(labels == 4, 3, labels)
     return windows, labels, metadata
 
-
-def build_window_features(windows, metadata):
-    windows = windows.astype(np.float32)
-    task_ids = pd.to_numeric(metadata["taskID"], errors="coerce").fillna(0).astype(int).to_numpy()
-    num_task_classes = int(task_ids.max()) + 1 if task_ids.size else 1
-    task_one_hot = tf.keras.utils.to_categorical(task_ids, num_classes=num_task_classes).astype(np.float32)
-    task_features = np.repeat(task_one_hot[:, None, :], windows.shape[1], axis=1)
-
-    if "isTurn" in metadata.columns:
-        is_turn = pd.to_numeric(metadata["isTurn"], errors="coerce").fillna(0).astype(np.float32).to_numpy()
-    else:
-        is_turn = np.zeros(len(metadata), dtype=np.float32)
-    is_turn_features = np.repeat(is_turn[:, None, None], windows.shape[1], axis=1)
-
-    return np.concatenate([windows, task_features, is_turn_features], axis=-1)
-
-
-def build_subject_bags(windows, labels, metadata):
-    subject_keys = metadata.apply(lambda row: (str(row["dataset"]), str(row["subjectID"]).strip()), axis=1)
-    bag_map = {}
-    for index, key in enumerate(subject_keys):
-        bag_map.setdefault(tuple(key), []).append(index)
-
-    bag_windows, bag_labels, bag_keys, bag_sizes = [], [], [], []
-    for key, indices in bag_map.items():
-        bag_windows.append(windows[indices])
-        bag_labels.append(int(pd.Series(labels[indices]).mode().iloc[0]))
-        bag_keys.append(key)
-        bag_sizes.append(len(indices))
-
-    return bag_windows, np.asarray(bag_labels, dtype=np.int64), bag_keys, np.asarray(bag_sizes, dtype=np.int64)
-
-
-def pad_bag_list(bag_list):
-    max_windows = max(len(bag) for bag in bag_list)
-    window_shape = bag_list[0].shape[1:]
-    padded = np.zeros((len(bag_list), max_windows, *window_shape), dtype=np.float32)
-    mask = np.zeros((len(bag_list), max_windows), dtype=np.float32)
-
-    for bag_index, bag in enumerate(bag_list):
-        length = len(bag)
-        padded[bag_index, :length] = bag.astype(np.float32)
-        mask[bag_index, :length] = 1.0
-
-    return padded, mask
-
-def apply_stretching(X, stretch_factor_range=(0.8, 1.2)):
-    batch_size, T, channels = X.shape
-    X_stretched = np.empty_like(X)
+def patient_wise_split(metadata, labels):
+    """Esegue lo split basato sull'ID del soggetto per evitare data leakage[cite: 4]."""
+    subjects = metadata[['dataset', 'subjectID']].drop_duplicates()
     
-    for i in range(batch_size):
-        factor = np.random.uniform(*stretch_factor_range)
-        T_new = int(T * factor)
-        T_new = max(T_new, 2) 
-        
-        for c in range(channels):
-            x_old = np.linspace(0, 1, T)
-            x_new = np.linspace(0, 1, T_new)
-            y_new = np.interp(x_new, x_old, X[i, :, c])
-            
-            X_stretched[i, :, c] = np.interp(np.linspace(0, 1, T), x_new, y_new)
-    return X_stretched
-
-def apply_slope(X, max_slope=0.5):
-    batch_size, T, channels = X.shape
-    X_sloped = X.copy()
-    for i in range(batch_size):
-        slope = np.linspace(0, np.random.uniform(-max_slope, max_slope), T)
-        X_sloped[i] += slope[:, np.newaxis]
-    return X_sloped
-
-def apply_flipping(X):
-    return X * -1
-
-def augmentation(X, y, target_count=None):
-    if target_count is None:
-        target_count = np.max(np.bincount(y))
+    # Etichetta prevalente per soggetto per stratificazione
+    subj_labels = []
+    for _, s in subjects.iterrows():
+        mask = (metadata['dataset'] == s['dataset']) & (metadata['subjectID'] == s['subjectID'])
+        subj_labels.append(labels[mask][0])
     
-    unique_labels = np.unique(y)
-    final_X, final_y = [], []
-
-    for label in unique_labels:
-        idx = np.where(y == label)[0]
-        cls_X = X[idx]
-        
-        final_X.append(cls_X)
-        final_y.append(y[idx])
-        
-        num_to_add = target_count - len(cls_X)
-        
-        if num_to_add > 0:
-            base_indices = np.random.choice(len(cls_X), num_to_add, replace=True)
-            base_samples = cls_X[base_indices].copy()
-            technique = np.random.choice(['flipping', 'stretching', 'slope'])
-            
-            if technique == 'flipping':
-                synth = apply_flipping(base_samples)
-            elif technique == 'stretching':
-                synth = apply_stretching(base_samples)
-            elif technique == 'slope':
-                synth = apply_slope(base_samples)
-                
-            final_X.append(synth)
-            final_y.append(np.full(num_to_add, label))
-
-    return np.concatenate(final_X), np.concatenate(final_y)
-
-def print_dataset_diagnostics(windows, labels, metadata, bag_labels, bag_sizes):
-    print("\n" + "="*50)
-    print("PATIENT-LEVEL DIAGNOSTICS")
-    print("="*50)
-    print(f"Total windows: {len(windows)}")
-    print(f"Total patients/bags: {len(bag_labels)}")
-    print(f"Global label distribution: {np.bincount(labels)}")
-    print(f"Patient label distribution: {np.bincount(bag_labels)}")
-    print(f"Window shape: {windows.shape}")
-    print(f"Window value range (min/max): [{windows.min():.6f}, {windows.max():.6f}]")
-    print(f"Window std: {windows.std():.6f}, mean: {windows.mean():.6f}")
-    print(f"Bag size range (min/max): [{bag_sizes.min()}, {bag_sizes.max()}]")
-    print(f"Bag size mean: {bag_sizes.mean():.2f}")
-    print("="*50 + "\n")
-
-
-def run_experiment(bag_windows, bag_labels):
-    print("\n" + "="*40 + "\nPATIENT-LEVEL CNN-GRU EXPERIMENT\n" + "="*40)
-
-    patient_accuracies = []
-    patient_f1s = []
-    patient_aucs = []
-    config = TASK_CONFIG["static"]
-    device_name = "/GPU:0" if tf.config.list_physical_devices('GPU') else "/CPU:0"
-    num_classes = int(np.max(bag_labels)) + 1
-
-    bags_by_class = {}
-    for index, label in enumerate(bag_labels):
-        bags_by_class.setdefault(int(label), []).append(index)
-
-    train_indices = []
-    test_indices = []
-    for label, indices in bags_by_class.items():
-        sorted_indices = sorted(indices)
-        if len(sorted_indices) == 1:
-            train_indices.extend(sorted_indices)
-            continue
-
-        train_count = max(1, len(sorted_indices) // 2)
-        if train_count >= len(sorted_indices):
-            train_count = len(sorted_indices) - 1
-
-        train_indices.extend(sorted_indices[:train_count])
-        test_indices.extend(sorted_indices[train_count:])
-
-    if not test_indices:
-        raise ValueError("The holdout split produced no test subjects. Check the class distribution.")
-
-    train_bags = [bag_windows[index] for index in train_indices]
-    test_bags = [bag_windows[index] for index in test_indices]
-    y_train = bag_labels[train_indices]
-    y_test = bag_labels[test_indices]
-
-    x_train_windows, x_train_mask = pad_bag_list(train_bags)
-    x_test_windows, x_test_mask = pad_bag_list(test_bags)
-    X_train = {"windows": x_train_windows, "mask": x_train_mask}
-    X_test = {"windows": x_test_windows, "mask": x_test_mask}
-
-    print(f"Training patients: {len(train_indices)} | Test patients: {len(test_indices)}")
-    print("Patient class distribution before training:", np.bincount(y_train))
-    print("Patient class distribution on test:", np.bincount(y_test))
-
-    tf.keras.backend.clear_session()
-    model = BagCnnGru(num_classes=num_classes)
-
-    class_counts = np.bincount(y_train, minlength=num_classes)
-    class_weights = {i: (len(y_train) / (num_classes * count)) if count > 0 else 1.0 for i, count in enumerate(class_counts)}
-
-    model, _, history = fit_model(
-        model, X_train, y_train, device_name,
-        batch_size=config["batch_size"], max_epochs=MAX_EPOCHS, patience=EARLY_STOPPING_PATIENCE,
-        X_val=None, y_val=None, lr=config["lr"], class_weights=class_weights
+    # Split: 60% Train (per pre-training), 40% Test (per valutazione finale)[cite: 4]
+    s_train_full, s_test = train_test_split(
+        subjects, test_size=0.4, stratify=subj_labels, random_state=RANDOM_STATE
     )
+    
+    # Sottodivisione Train/Val per il pre-training window-wise
+    s_train, s_val = train_test_split(s_train_full, test_size=0.2, random_state=RANDOM_STATE)
+    
+    return s_train, s_val, s_test
 
-    y_prob = model.predict(X_test, batch_size=config["batch_size"], verbose=0)
-    y_pred = np.argmax(y_prob, axis=1)
-    patient_acc = accuracy_score(y_test, y_pred)
-    patient_f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
-    try:
-        y_true_bin = label_binarize(y_test, classes=np.arange(num_classes))
-        patient_auc = roc_auc_score(y_true_bin, y_prob, average='macro', multi_class='ovr')
-    except ValueError:
-        patient_auc = float('nan')
+def get_windows_by_subjects(windows, labels, metadata, subjects_subset):
+    """Estrae le finestre appartenenti a un gruppo di soggetti[cite: 4]."""
+    mask = metadata.apply(lambda r: any((subjects_subset['dataset'] == r['dataset']) & 
+                                        (subjects_subset['subjectID'] == r['subjectID'])), axis=1)
+    return windows[mask], labels[mask]
 
-    patient_accuracies.append(patient_acc)
-    patient_f1s.append(patient_f1)
-    patient_aucs.append(patient_auc)
+def extract_task_aware_features(model, windows, labels, metadata, subjects_subset):
+    """
+    Estrae Mean, Std, Max, Min dallo spazio latente per ogni Task (0, 1, 2).
+    Garantisce che ogni paziente abbia un vettore di lunghezza fissa.
+    """
+    all_patient_features = []
+    patient_labels = []
+    expected_tasks = [0, 1, 2]
 
-    print(f"Patient Accuracy: {patient_acc:.4f}")
-    print(f"Patient F1-macro: {patient_f1:.4f}")
-    print(f"Patient AUC-macro: {patient_auc:.4f}")
-    print("Patient confusion matrix:")
-    print(confusion_matrix(y_test, y_pred))
+    for _, s in subjects_subset.iterrows():
+        p_mask = (metadata['dataset'] == s['dataset']) & (metadata['subjectID'] == s['subjectID'])
+        p_windows = windows[p_mask].astype('float32')
+        p_meta = metadata[p_mask]
 
-    print(f"\nAverage Patient Accuracy: {np.mean(patient_accuracies):.4f}")
-    print(f"Average Patient F1-macro: {np.mean(patient_f1s):.4f}")
-    print(f"Average Patient AUC-macro: {np.nanmean(patient_aucs):.4f}")
-    return np.mean(patient_accuracies)
+        # Estrazione embedding latente tramite il modello addestrato[cite: 5]
+        z = model.get_latent(p_windows).numpy()
+        latent_dim = z.shape[-1]
+        task_feature_size = latent_dim * 4  # mean, std, max, min
+
+        patient_vector = []
+        for tid in expected_tasks:
+            task_indices = (p_meta['taskID'] == tid).values
+            if np.any(task_indices):
+                z_task = z[task_indices]
+                stats = np.concatenate([
+                    z_task.mean(axis=0),
+                    z_task.std(axis=0),
+                    z_task.max(axis=0),
+                    z_task.min(axis=0)
+                ])
+            else:
+                # Padding con zeri se il paziente non ha eseguito quel task
+                stats = np.zeros(task_feature_size)
+
+            patient_vector.append(stats)
+
+        all_patient_features.append(np.concatenate(patient_vector))
+        patient_labels.append(labels[p_mask][0])
+
+    return np.stack(all_patient_features), np.array(patient_labels)
 
 def main():
-    data_path = "posturalInstability/cnn_gru/data/"
-    windows, labels, metadata = load_windowed_data(data_path)
+    # 1. Caricamento Dati[cite: 4]
+    windows, labels, metadata = load_data()
+    s_train, s_val, s_test = patient_wise_split(metadata, labels)
 
-    labels = np.where(labels == 4, 3, labels)
-    windows = build_window_features(windows, metadata)
-    bag_windows, bag_labels, bag_keys, bag_sizes = build_subject_bags(windows, labels, metadata)
+    # 2. Pre-training Supervisionato Window-wise[cite: 4, 6]
+    # Usiamo il modello CNN-LSTM per imparare la dinamica temporale[cite: 5]
+    xw_train, yw_train = get_windows_by_subjects(windows, labels, metadata, s_train)
+    xw_val, yw_val = get_windows_by_subjects(windows, labels, metadata, s_val)
+    
+    input_shape = windows.shape[1:]
+    num_classes = int(np.max(labels)) + 1
+    
+    print(f"Inizio Pre-training CNN-LSTM su {len(xw_train)} finestre...")
+    model = CnnGruModel(input_shape=input_shape, num_classes=num_classes)
+    train_cnn_lstm_pretrainer(model, xw_train, yw_train, xw_val, yw_val, CHECKPOINT_PATH)
 
-    print_dataset_diagnostics(windows, labels, metadata, bag_labels, bag_sizes)
-    result = run_experiment(bag_windows, bag_labels)
-    print(f"\nFINAL RESULT: {result:.4f}")
+    # 3. Estrazione Feature Patient-wise (MIL con Task Context)[cite: 4]
+    print("Estrazione feature aggregate per paziente...")
+    s_train_full = pd.concat([s_train, s_val])
+    X_train_p, y_train_p = extract_task_aware_features(model, windows, labels, metadata, s_train_full)
+    X_test_p, y_test_p = extract_task_aware_features(model, windows, labels, metadata, s_test)
+
+    # 4. Benchmarking Modelli Classici[cite: 4]
+    clfs = {
+        "SVM (RBF)": Pipeline([
+            ('scaler', StandardScaler()),
+            ('svm', SVC(kernel='rbf', class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+        ]),
+        "Random Forest": RandomForestClassifier(
+            n_estimators=500, class_weight='balanced_subsample', random_state=RANDOM_STATE
+        )
+    }
+
+    for name, clf in clfs.items():
+        clf.fit(X_train_p, y_train_p)
+        y_pred = clf.predict(X_test_p)
+        
+        print(f"\n--- Risultati {name} ---")
+        print(f"Accuracy: {accuracy_score(y_test_p, y_pred):.4f}")
+        print(f"F1-Macro: {f1_score(y_test_p, y_pred, average='macro'):.4f}")
+        print("Matrice di Confusione:")
+        print(confusion_matrix(y_test_p, y_pred))
+
+        # print t-SNE per visualizzare le feature estratte
+        from sklearn.manifold import TSNE
+        tsne = TSNE(n_components=2, random_state=RANDOM_STATE)
+        X_test_tsne = tsne.fit_transform(X_test_p)
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(X_test_tsne[:, 0], X_test_tsne[:, 1], c=y_test_p, cmap='viridis', alpha=0.7)
+        plt.legend(*scatter.legend_elements(), title="Classi")
+        plt.title(f"t-SNE delle feature estratte - {name}")
+        plt.xlabel("Dimensione 1")
+        plt.ylabel("Dimensione 2")
+        plt.grid(True)
+        plt.show()
 
 if __name__ == "__main__":
     main()

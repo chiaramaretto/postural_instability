@@ -22,7 +22,7 @@ DATASETS = ["fog_star", "omnia_park", "pd_phone", "wearpd", "kiel"]
 SENSOR_COLS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
 TARGET_HZ = 128
 WINDOW_SEC = 5
-OVERLAP = 0.0
+OVERLAP = 0.2
 
 RAW_DATA_DIR = Path("posturalInstability/data/cleaned_data")
 OUTPUT_DIR = Path("posturalInstability/cnn_gru/data/")
@@ -169,7 +169,7 @@ def estimate_label_window_count(df, label, win_size, overlap):
     return total
 
 
-def choose_label_overlaps(df, target_fraction=0.5, majority_overlap=0.0, candidate_overlaps=None):
+def choose_label_overlaps(df, target_fraction=0.8, majority_overlap=0.0, candidate_overlaps=None):
     if candidate_overlaps is None:
         candidate_overlaps = np.round(np.linspace(0.1, 0.9, 9), 2)
 
