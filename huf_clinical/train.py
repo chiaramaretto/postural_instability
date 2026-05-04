@@ -242,7 +242,15 @@ def fine_tune_lff_clinical(
         total_reg = 0.0
         n_batches = 0
 
-        for x, y, has_target in loader:
+        for batch in loader:
+            if len(batch) == 3:
+                x, y, has_target = batch
+            elif len(batch) == 2:
+                x, y = batch
+                has_target = torch.ones_like(y, dtype=torch.bool)
+            else:
+                raise ValueError(f"Unexpected batch format: expected 2 or 3 items, got {len(batch)}")
+
             x = x.to(device, non_blocking=(device.type == "cuda"))
             y = y.to(device, non_blocking=(device.type == "cuda"))
             has_target = has_target.to(device, non_blocking=(device.type == "cuda"))
@@ -281,7 +289,15 @@ def fine_tune_lff_clinical(
             val_batches = 0
 
             with torch.no_grad():
-                for x, y, has_target in val_loader:
+                for batch in val_loader:
+                    if len(batch) == 3:
+                        x, y, has_target = batch
+                    elif len(batch) == 2:
+                        x, y = batch
+                        has_target = torch.ones_like(y, dtype=torch.bool)
+                    else:
+                        raise ValueError(f"Unexpected batch format: expected 2 or 3 items, got {len(batch)}")
+
                     x = x.to(device, non_blocking=(device.type == "cuda"))
                     y = y.to(device, non_blocking=(device.type == "cuda"))
                     has_target = has_target.to(device, non_blocking=(device.type == "cuda"))
