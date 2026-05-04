@@ -40,6 +40,51 @@ def save_npy_atomic(file_path, array):
         np.save(handle, array)
     os.replace(temp_path, file_path)
 
+
+class AxisDataset:
+    def __init__(self, axis_array, mean_value, std_value):
+        self.axis_array = axis_array
+        self.mean_value = mean_value
+        self.std_value = std_value
+
+    def __len__(self):
+        return len(self.axis_array)
+
+    def __getitem__(self, idx):
+        sample = np.asarray(self.axis_array[idx], dtype=np.float32)
+        sample = (sample - self.mean_value) / (self.std_value + 1e-8)
+        return torch.from_numpy(sample).unsqueeze(0)
+
+
+class FusionDataset:
+    def __init__(self, feat_mmaps):
+        self.feat_mmaps = feat_mmaps
+        self.n_samples = len(feat_mmaps[0])
+
+    def __len__(self):
+        return self.n_samples
+
+    def __getitem__(self, idx):
+        batch_feats = np.concatenate([m[idx:idx + 1] for m in self.feat_mmaps], axis=1)
+        return torch.from_numpy(batch_feats.astype(np.float32))
+
+
+class FusionLabelDataset:
+    def __init__(self, feat_mmaps, labels):
+        self.feat_mmaps = feat_mmaps
+        self.labels = labels
+        self.n_samples = len(feat_mmaps[0])
+
+    def __len__(self):
+        return self.n_samples
+
+    def __getitem__(self, idx):
+        batch_feats = np.concatenate([m[idx:idx + 1] for m in self.feat_mmaps], axis=1)
+        return (
+            torch.from_numpy(batch_feats.astype(np.float32)),
+            torch.tensor(self.labels[idx], dtype=torch.float32),
+        )
+
 def load_fusion_data_mmap(split):
     """Carica le feature DR-SAE già estratte via mmap (non i dati grezzi)."""
     feats = []
@@ -71,14 +116,24 @@ def main():
         if not os.path.exists(ckpt_path):
             print(f"\n--- Training DR-SAE: {col} ---")
             # Carica training normalizato
-            train_data = (np.load(train_axis_path, mmap_mode='c').astype(np.float32) - mean_tr) / (std_tr + 1e-8)
-            train_tensor = torch.from_numpy(train_data).unsqueeze(1)
+            train_data = np.load(train_axis_path, mmap_mode='c')
+            train_tensor = torch.from_numpy(((train_data.astype(np.float32) - mean_tr) / (std_tr + 1e-8))).unsqueeze(1)
             loader = DataLoader(TensorDataset(train_tensor), batch_size=BATCH_SIZE, shuffle=True)
+
+            val_axis_path = os.path.join(CHANNELS_PATH, "val", f"{col}.npy")
+            val_loader = None
+            if os.path.exists(val_axis_path):
+                val_data = np.load(val_axis_path, mmap_mode='r')
+                val_loader = DataLoader(
+                    AxisDataset(val_data, mean_tr, std_tr),
+                    batch_size=BATCH_SIZE,
+                    shuffle=False,
+                )
             
-            model_dr = train_stacked_dr_sae(model_dr, loader, device, max_epochs=20)
+            model_dr = train_stacked_dr_sae(model_dr, loader, device, val_loader=val_loader, max_epochs=20)
             torch.save(model_dr.state_dict(), ckpt_path)
             
-            del train_data, train_tensor, loader
+            del train_data, train_tensor, loader, val_loader
             gc.collect()
             torch.cuda.empty_cache()
         else:
@@ -140,28 +195,24 @@ def main():
     if not os.path.exists(ckpt_lff_base):
         print("\n--- Training LFF-AE (Unsupervised) ---")
         feat_mmaps = load_fusion_data_mmap("train")
-        n_train = len(feat_mmaps[0])
-        
-        # Dataset custom per gestire batching da mmap
-        class FusionDataset:
-            def __init__(self, feat_mmaps):
-                self.feat_mmaps = feat_mmaps
-                self.n_samples = len(feat_mmaps[0])
-            
-            def __len__(self):
-                return self.n_samples
-            
-            def __getitem__(self, idx):
-                batch_feats = np.concatenate([m[idx:idx+1] for m in self.feat_mmaps], axis=1)
-                return torch.from_numpy(batch_feats.astype(np.float32))
-        
         dataset_fusion = FusionDataset(feat_mmaps)
         loader_fusion = DataLoader(dataset_fusion, batch_size=BATCH_SIZE, shuffle=True)
+
+        val_feat_mmaps = load_fusion_data_mmap("val")
+        val_dataset_fusion = FusionDataset(val_feat_mmaps)
+        val_loader_fusion = DataLoader(val_dataset_fusion, batch_size=BATCH_SIZE, shuffle=False)
         
-        model_lff = train_fusion_block(model_lff, loader_fusion, device, max_epochs=20, block_name="LFF")
+        model_lff = train_fusion_block(
+            model_lff,
+            loader_fusion,
+            device,
+            val_loader=val_loader_fusion,
+            max_epochs=20,
+            block_name="LFF",
+        )
         torch.save(model_lff.state_dict(), ckpt_lff_base)
         
-        del feat_mmaps, dataset_fusion, loader_fusion
+        del feat_mmaps, dataset_fusion, loader_fusion, val_feat_mmaps, val_dataset_fusion, val_loader_fusion
         gc.collect()
     else:
         model_lff.load_state_dict(torch.load(ckpt_lff_base, map_location=device))
@@ -172,27 +223,24 @@ def main():
         feat_mmaps = load_fusion_data_mmap("train")
         y_train = np.load(os.path.join(BASE_DATA_PATH, "train", "labels.npy"), mmap_mode='c').astype(np.float32)
         
-        class FusionLabelDataset:
-            def __init__(self, feat_mmaps, labels):
-                self.feat_mmaps = feat_mmaps
-                self.labels = labels
-                self.n_samples = len(feat_mmaps[0])
-            
-            def __len__(self):
-                return self.n_samples
-            
-            def __getitem__(self, idx):
-                batch_feats = np.concatenate([m[idx:idx+1] for m in self.feat_mmaps], axis=1)
-                return (torch.from_numpy(batch_feats.astype(np.float32)), 
-                        torch.tensor(self.labels[idx], dtype=torch.float32))
-        
         dataset_lff = FusionLabelDataset(feat_mmaps, y_train)
         loader_lff = DataLoader(dataset_lff, batch_size=BATCH_SIZE, shuffle=True)
+
+        val_feat_mmaps = load_fusion_data_mmap("val")
+        val_labels = np.load(os.path.join(BASE_DATA_PATH, "val", "labels.npy"), mmap_mode='c').astype(np.float32)
+        val_dataset_lff = FusionLabelDataset(val_feat_mmaps, val_labels)
+        val_loader_lff = DataLoader(val_dataset_lff, batch_size=BATCH_SIZE, shuffle=False)
         
-        model_lff = fine_tune_lff_clinical(model_lff, loader_lff, device, max_epochs=15)
+        model_lff = fine_tune_lff_clinical(
+            model_lff,
+            loader_lff,
+            device,
+            val_loader=val_loader_lff,
+            max_epochs=15,
+        )
         torch.save(model_lff.state_dict(), ckpt_lff_clinical)
         
-        del feat_mmaps, y_train, dataset_lff, loader_lff
+        del feat_mmaps, y_train, dataset_lff, loader_lff, val_feat_mmaps, val_labels, val_dataset_lff, val_loader_lff
         gc.collect()
     else:
         model_lff.load_state_dict(torch.load(ckpt_lff_clinical, map_location=device))
