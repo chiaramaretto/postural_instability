@@ -65,7 +65,7 @@ class FusionDataset:
         return self.n_samples
 
     def __getitem__(self, idx):
-        batch_feats = np.concatenate([m[idx:idx + 1] for m in self.feat_mmaps], axis=1)
+        batch_feats = np.concatenate([m[idx] for m in self.feat_mmaps], axis=0)
         return torch.from_numpy(batch_feats.astype(np.float32))
 
 
@@ -79,7 +79,7 @@ class FusionLabelDataset:
         return self.n_samples
 
     def __getitem__(self, idx):
-        batch_feats = np.concatenate([m[idx:idx + 1] for m in self.feat_mmaps], axis=1)
+        batch_feats = np.concatenate([m[idx] for m in self.feat_mmaps], axis=0)
         return (
             torch.from_numpy(batch_feats.astype(np.float32)),
             torch.tensor(self.labels[idx], dtype=torch.float32),
