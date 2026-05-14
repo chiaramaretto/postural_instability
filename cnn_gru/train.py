@@ -1,54 +1,99 @@
 import os
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+from sklearn.utils import class_weight
 
 
-class SparseMacroF1(tf.keras.metrics.Metric):
-    def __init__(self, num_classes, name="f1_score", **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.num_classes = int(num_classes)
-        self.f1 = tf.keras.metrics.F1Score(average="macro", threshold=None)
+# ──────────────────────────────────────────────────────────────────────────────
+# CLASSIFICATION TRAINING (task recognition)
+# ──────────────────────────────────────────────────────────────────────────────
 
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        y_true = tf.cast(y_true, tf.int32)
-        y_true = tf.one_hot(y_true, depth=self.num_classes)
-        return self.f1.update_state(y_true, y_pred, sample_weight=sample_weight)
+def train(model, x_train, y_train, x_val, y_val,
+          checkpoint_path, weights_filename="best_cnn_gru.weights.h5"):
+    """
+    Train CnnGruModel on 3-class task recognition (stance / walking / turning).
+    y_train / y_val: integer class labels (0, 1, 2).
+    """
+    full_path = os.path.join(checkpoint_path, weights_filename)
 
-    def result(self):
-        return self.f1.result()
+    # Balanced class weights
+    classes = np.unique(y_train)
+    cw = class_weight.compute_class_weight("balanced", classes=classes, y=y_train)
+    cw_dict = dict(enumerate(cw))
+    print(f"Training con pesi classe: {cw_dict}")
 
-    def reset_state(self):
-        self.f1.reset_state()
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({"num_classes": self.num_classes})
-        return config
-
-def train_cnn_lstm_pretrainer(model, x_train, y_train, x_val, y_val, checkpoint_path):
-    # Abbassiamo drasticamente il learning rate e aggiungiamo il clipping
-    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=1.0)
-
-    f1_metric = SparseMacroF1(model.num_classes)
-    
     model.compile(
-        optimizer=optimizer,
-        loss="sparse_categorical_crossentropy",
-        metrics=[f1_metric]
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=1.0),
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+        metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
     )
-    
-    # Early stopping più severo per bloccare l'overfitting sul nascere
-    weights_path = checkpoint_path if checkpoint_path.endswith(".weights.h5") else checkpoint_path + ".weights.h5"
+
     callbacks = [
-        tf.keras.callbacks.ModelCheckpoint(weights_path, monitor="val_f1_score", mode="max", save_best_only=True, save_weights_only=True),
-        tf.keras.callbacks.EarlyStopping(monitor="val_f1_score", mode="max", patience=20, restore_best_weights=True)
+        tf.keras.callbacks.ModelCheckpoint(
+            full_path, monitor="val_accuracy", mode="max",
+            save_best_only=True, save_weights_only=True,
+        ),
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_accuracy", patience=20, restore_best_weights=True,
+        ),
     ]
-    
+
     return model.fit(
         x_train, y_train,
         validation_data=(x_val, y_val),
-        epochs=120,
-        batch_size=64, # Aumentare il batch size aiuta a stabilizzare la LSTM
+        epochs=100,
+        batch_size=64,
+        class_weight=cw_dict,
         callbacks=callbacks,
-        verbose=1
+        verbose=1,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# AUTOENCODER TRAINING (self-supervised reconstruction)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def train_autoencoder(model, x_train, x_val,
+                      checkpoint_path, weights_filename="best_ae.weights.h5"):
+    """
+    Train ImuEncoder as a masked autoencoder.
+    Target = original signal (reconstruction objective, MSE loss).
+    No class labels needed — fully self-supervised.
+
+    x_train / x_val: float32 arrays of shape (n_windows, 640, 6).
+    """
+    full_path = os.path.join(checkpoint_path, weights_filename)
+
+    print(f"Autoencoder training: {x_train.shape[0]} train windows, "
+          f"{x_val.shape[0]} val windows")
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=3e-4, clipnorm=1.0),
+        loss="mse",
+        metrics=["mae"],
+    )
+
+    callbacks = [
+        tf.keras.callbacks.ModelCheckpoint(
+            full_path, monitor="val_loss", mode="min",
+            save_best_only=True, save_weights_only=True,
+        ),
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=15, restore_best_weights=True,
+        ),
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=7,
+            min_lr=1e-6, verbose=1,
+        ),
+    ]
+
+    # Input = masked signal (handled inside model.call during training)
+    # Target = original signal
+    return model.fit(
+        x_train, x_train,          # target is the original, masking is inside call()
+        validation_data=(x_val, x_val),
+        epochs=100,
+        batch_size=64,
+        callbacks=callbacks,
+        verbose=1,
     )
