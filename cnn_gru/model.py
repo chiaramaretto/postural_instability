@@ -41,12 +41,12 @@ class CnnGru(tf.keras.Model):
         latent = self.dense_feat(x)
         return self.classifier(latent)
 
-    def get_latent(self, inputs):
+    def get_latent(self, inputs, training=False):
         """Extract 16-dim latent vector (no classification head)."""
         x = self.conv1(inputs)
-        x = self.bn1(x, training=False)
+        x = self.bn1(x, training=training)
         x = self.conv2(x)
-        x = self.bn2(x, training=False)
+        x = self.bn2(x, training=training)
         x = self.gru(x)
         return self.dense_feat(x)
 
@@ -123,7 +123,7 @@ class ImuEncoder(tf.keras.Model):
         x_dec = self.deconv2(x_dec)                   # (batch, seq_len, 32)
         return self.out_layer(x_dec)                  # (batch, seq_len, 6)
 
-    def get_latent(self, inputs):
-        enc    = self._encode(inputs, training=False)
+    def get_latent(self, inputs, training=False):
+        enc    = self._encode(inputs, training=training)
         pooled = self.global_avg(enc)
         return self.latent_feat(pooled)

@@ -20,7 +20,7 @@ RANDOM_STATE    = 42
 FS              = 128.0
 LATENT_DIM      = 16  
 ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
-USE_MMD         = False
+USE_MMD         = True
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.1
 
