@@ -2,13 +2,14 @@ import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from scipy.signal import butter, filtfilt
+from fractions import Fraction
+from scipy.signal import butter, filtfilt, resample_poly
 
 # --- CONFIGURAZIONE ---
 SF_DICT = {"fog_star": 60.0, "omnia_park": 90.0, "pd_phone": 200.0, "wearpd": 100.0, "kiel": 200.0}
 DATASETS = ["fog_star", "omnia_park", "pd_phone", "wearpd", "kiel"]
 SENSOR_COLS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
-TARGET_HZ = 128
+TARGET_HZ = 64
 WINDOW_SEC = 5
 
 # Parametri Adaptive Windowing
@@ -30,9 +31,15 @@ def apply_lowpass(group, sf, cutoff=20.0):
     for col in SENSOR_COLS:
         valid_mask = ~group[col].isna()
         if valid_mask.sum() > 30: 
-            mean_val = group.loc[valid_mask, col].mean()
-            centered = group.loc[valid_mask, col].values - mean_val
-            group.loc[valid_mask, col] = filtfilt(b, a, centered) + mean_val
+            values = group.loc[valid_mask, col].values
+            padlen = min(len(values) - 1, 3 * max(len(a), len(b)))
+            group.loc[valid_mask, col] = filtfilt(
+                b,
+                a,
+                values,
+                padtype="odd",
+                padlen=padlen,
+            )
     return group
 
 def soft_trim_outliers(group, sf, z_threshold=5):
@@ -82,15 +89,25 @@ def resample_group(group, original_sf):
         "taskID": int(group["taskID"].iloc[0]),
         "dataset": group["dataset"].iloc[0]
     }
-    x_orig = np.arange(len(group))
-    x_new = np.linspace(0, len(group)-1, n_target)
+    ratio = Fraction(int(TARGET_HZ), int(round(original_sf))).limit_denominator()
+    up, down = ratio.numerator, ratio.denominator
     for col in SENSOR_COLS:
-        resampled[col] = np.interp(x_new, x_orig, group[col].values)
+        values = group[col].values
+        resampled_values = resample_poly(values, up, down)
+        if len(resampled_values) > n_target:
+            resampled_values = resampled_values[:n_target]
+        elif len(resampled_values) < n_target:
+            resampled_values = np.pad(resampled_values, (0, n_target - len(resampled_values)), mode="edge")
+        resampled[col] = resampled_values
     
     if "isTurn" in group.columns:
         turn_vals = group["isTurn"].values
-        target_idx = np.linspace(0, len(group)-1, n_target).astype(int)
-        resampled["isTurn"] = turn_vals[target_idx]
+        turn_resampled = resample_poly(turn_vals, up, down)
+        if len(turn_resampled) > n_target:
+            turn_resampled = turn_resampled[:n_target]
+        elif len(turn_resampled) < n_target:
+            turn_resampled = np.pad(turn_resampled, (0, n_target - len(turn_resampled)), mode="edge")
+        resampled["isTurn"] = np.rint(turn_resampled).astype(int)
     else:
         resampled["isTurn"] = np.zeros(n_target)
     return pd.DataFrame(resampled)
