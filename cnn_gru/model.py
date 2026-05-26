@@ -57,7 +57,7 @@ class CnnGru(tf.keras.Model):
 
 @tf.keras.utils.register_keras_serializable()
 class ImuEncoder(tf.keras.Model):
-    def __init__(self, input_shape=(640, 6), latent_dim=16, mask_prob=0.3, **kwargs):
+    def __init__(self, input_shape=(640, 6), latent_dim = 8, mask_prob=0.3, **kwargs):
         super().__init__(**kwargs)
         self.input_shape_spec = input_shape
         self.latent_dim  = latent_dim

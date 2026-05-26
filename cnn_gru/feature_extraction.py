@@ -16,10 +16,10 @@ DATA_PATH       = "posturalInstability/cnn_gru/data/"
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
-FS              = 128.0
+FS              = 64
 LATENT_DIM      = 8  
 ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
-USE_MMD         = False
+USE_MMD         = True
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.1
 
@@ -216,7 +216,9 @@ def _lat_agg(rows):
 def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
                               subjects_df, enc_stance, enc_walk=None):
     X, y, y_4cls, dsets, sids = [], [], [], [], []
-    zero_lat = np.zeros(LATENT_DIM * 3, dtype=np.float32)
+    nan_lat = np.full(LATENT_DIM * 3, np.nan, dtype=np.float32)
+    nan_hc_s = np.full(8, np.nan, dtype=np.float32)
+    nan_hc_w = np.full(6, np.nan, dtype=np.float32)
 
     for _, s in subjects_df.iterrows():
         m = (metadata["dataset"] == s["dataset"]) & \
@@ -229,23 +231,24 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
         p_win -= p_win.mean(axis=(0, 1), keepdims=True)
 
         is_stance  = ((p_meta["taskID"] == 0) | (p_meta["taskID"] == 1)).values
+        is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
+        is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
 
         has_s = is_stance.any()
+        has_w = is_walking.any()
 
-        lat_s = _lat_agg(list(enc_stance.get_latent(p_win[is_stance]).numpy())) if has_s else None
+        lat_s = _lat_agg(list(enc_stance.get_latent(p_win[is_stance]).numpy())) if has_s else nan_lat
+        lat_w = _lat_agg(list(enc_walk.get_latent(p_win[is_walking]).numpy())) if (has_w and enc_walk is not None) else nan_lat
 
-        # Walking/turning are kept in the file for later reactivation, but the
-        # current experiment uses stance only.
-        # is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
+        # Turning is kept commented for later use.
         # is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
 
-        lat_vec = lat_s if lat_s is not None else zero_lat
+        lat_vec = np.concatenate([lat_s, lat_w])
 
-        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4) if has_s else np.zeros(8, np.float32)
+        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4) if has_s else nan_hc_s
+        hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 3) if (has_w and enc_walk is not None) else nan_hc_w
 
-        # hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 3) if has_w else np.zeros(6, np.float32)
-
-        hc_vec = hc_s
+        hc_vec = np.concatenate([hc_s, hc_w])
 
         X.append(np.concatenate([lat_vec, hc_vec]))
         y.append(float(binary_labels[m][0]))
@@ -357,20 +360,19 @@ def main():
         input_shape=input_shape, arch_mode=ARCH_MODE
     )
     
-    # Walking encoder is kept here commented out for later reactivation.
-    # enc_walk = get_or_train_encoder(
-    #     task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata,
-    #     s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
-    #     input_shape=input_shape, arch_mode=ARCH_MODE
-    # )
+    enc_walk = get_or_train_encoder(
+        task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata,
+        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
+        input_shape=input_shape, arch_mode=ARCH_MODE
+    )
 
     print("\nExtracting patient-level features...")
     s_fit = pd.concat([s_train, s_val]).reset_index(drop=True)
 
-    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_stance)
-    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_stance)
+    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_stance, enc_walk)
+    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_stance, enc_walk)
 
-    print(f"Full stance-only feature vector : {X_fit.shape[1]} dims")
+    print(f"Full stance+walking feature vector : {X_fit.shape[1]} dims")
     print(f"Train patients      : {len(y_fit)}")
     print(f"Test patients       : {len(y_test)}")
 
@@ -401,9 +403,7 @@ def main():
     print("\nFeature extraction complete.")
     print(f"Saved -> {train_out}")
     print(f"Saved -> {test_out}")
-    # Walking/turning and secondary encoders are left here commented out for later reactivation.
-    # print("Ready to run classifier.py for the double ablation study.")
-    print("Ready to run classifier.py for the stance-only ablation study.")
+    print("Ready to run classifier.py for the double ablation study.")
 
 if __name__ == "__main__":
     main()
