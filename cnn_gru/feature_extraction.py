@@ -357,13 +357,7 @@ def main():
         input_shape=input_shape, arch_mode=ARCH_MODE
     )
     
-    enc_walk = get_or_train_encoder(
-        task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata, 
-        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
-        input_shape=input_shape, arch_mode=ARCH_MODE
-    )
-
-    # Walking encoders are kept commented out for now.
+    # Walking encoder is kept here commented out for later reactivation.
     # enc_walk = get_or_train_encoder(
     #     task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata,
     #     s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
