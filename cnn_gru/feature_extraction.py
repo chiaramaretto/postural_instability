@@ -19,7 +19,7 @@ RANDOM_STATE    = 42
 FS              = 128.0
 LATENT_DIM      = 8  
 ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
-USE_MMD         = True
+USE_MMD         = False
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.1
 
@@ -281,7 +281,7 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
         full_path = os.path.join(CHECKPOINT_PATH, weights_filename_mmd)
 
     if arch_mode == "autoencoder":
-        model = ImuEncoder(input_shape=input_shape)
+        model = ImuEncoder(input_shape=input_shape, latent_dim=LATENT_DIM)
         model(tf.zeros((1,) + input_shape)) 
         if os.path.exists(full_path):
             print(f"Loading {arch_mode} weights for {task_name}...")
