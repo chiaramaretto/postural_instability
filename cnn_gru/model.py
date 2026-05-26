@@ -8,7 +8,7 @@ from keras.layers import (
 @tf.keras.utils.register_keras_serializable()
 class CnnGru(tf.keras.Model):
 
-    def __init__(self, input_shape=(640, 6), n_classes=4, latent_dim=16, **kwargs):
+    def __init__(self, input_shape=(640, 6), n_classes=4, latent_dim=8, **kwargs):
         super().__init__(**kwargs)
         self.input_shape_spec = input_shape
         self.n_classes  = n_classes

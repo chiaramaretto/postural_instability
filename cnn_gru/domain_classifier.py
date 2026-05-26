@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
+import sys
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
@@ -14,7 +16,23 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-FEATURE_MODES   = ["autoencoder", "classifier", "classifier_mmd"]
+FEATURE_PREFIX = "train_features_enriched_"
+ARCH_MODE = "classifier" 
+def discover_feature_modes(checkpoint_path=CHECKPOINT_PATH):
+    modes = []
+    for fname in os.listdir(checkpoint_path):
+        if not fname.startswith(FEATURE_PREFIX) or not fname.endswith('.csv'):
+            continue
+        mode = fname[len(FEATURE_PREFIX):-4]
+        # require both train and test files to exist for this mode
+        train_path = os.path.join(checkpoint_path, f"train_features_enriched_{mode}.csv")
+        test_path = os.path.join(checkpoint_path, f"test_features_enriched_{mode}.csv")
+        if os.path.exists(train_path) and os.path.exists(test_path):
+            modes.append(mode)
+    # sort deterministically, prefer known order if present
+    preferred = ["autoencoder", "classifier", "classifier_mmd"]
+    modes_sorted = [m for m in preferred if m in modes] + sorted([m for m in modes if m not in preferred])
+    return modes_sorted
 
 
 def get_models():
@@ -114,7 +132,7 @@ def evaluate_combo(mode, model_name, model):
         "Confusion Matrix Norm": cm_norm,
     }
 
-def main():
+def main(arch_mode=None):
     os.makedirs(RESULTS_PATH, exist_ok=True)
 
     print("Caricamento delle feature e benchmark dei modelli...\n")
@@ -122,7 +140,53 @@ def main():
     models = get_models()
     results = []
 
-    for mode in FEATURE_MODES:
+    feature_modes = discover_feature_modes(CHECKPOINT_PATH)
+    if not feature_modes:
+        print("No enriched feature CSV pairs found in models folder. Exiting.")
+        return
+
+    # determine which feature modes to run based on ARCH_MODE or CLI arg
+    active_modes = feature_modes
+    chosen = arch_mode or ARCH_MODE
+    if chosen:
+        # allow comma-separated list or single value; 'all' means run everything
+        if isinstance(chosen, str):
+            parts = [p.strip() for p in chosen.split(",") if p.strip()]
+        else:
+            parts = list(chosen)
+        # build selected modes with some convenient shorthands
+        selected = []
+        for p in parts:
+            pl = p.lower()
+            if pl == "all":
+                selected = feature_modes
+                break
+            if pl == "mmd":
+                for m in feature_modes:
+                    if m.endswith("_mmd") and m not in selected:
+                        selected.append(m)
+                continue
+            # exact match or prefix match (e.g., 'classifier' -> 'classifier' and 'classifier_mmd')
+            matched_any = False
+            for m in feature_modes:
+                if m == p or m.lower().startswith(pl):
+                    if m not in selected:
+                        selected.append(m)
+                    matched_any = True
+            if not matched_any:
+                # record as missing for warning later
+                selected.append(f"__MISSING__::{p}")
+
+        # separate missing and valid
+        missing = [s.split("::", 1)[1] for s in selected if s.startswith("__MISSING__::")]
+        active_modes = [s for s in selected if not s.startswith("__MISSING__::")]
+        if missing:
+            print(f"Warning: requested ARCH_MODE entries not found: {missing}")
+        if not active_modes:
+            print("No matching feature modes selected. Exiting.")
+            return
+
+    for mode in active_modes:
         print(f"Feature set: {mode}")
         for model_name, model in models.items():
             print(f"  -> {model_name}")
@@ -150,8 +214,8 @@ def main():
     summary_path = os.path.join(RESULTS_PATH, "domain_classifier_benchmark.csv")
     summary_df.to_csv(summary_path, index=False)
 
-    pivot = summary_df.pivot(index="Feature Set", columns="Model", values="Accuracy").reindex(FEATURE_MODES)
-    chance_by_mode = summary_df.groupby("Feature Set")["Chance"].first().reindex(FEATURE_MODES)
+    pivot = summary_df.pivot(index="Feature Set", columns="Model", values="Accuracy").reindex(active_modes)
+    chance_by_mode = summary_df.groupby("Feature Set")["Chance"].first().reindex(active_modes)
 
     plt.figure(figsize=(11, 6))
     ax = sns.heatmap(
@@ -173,11 +237,53 @@ def main():
     plt.savefig(overview_path, dpi=160)
     plt.close()
 
+    # Compare MMD vs non-MMD for same base architectures and save comparison CSVs
+    comps_saved = []
+    bases = sorted({m.replace("_mmd", "") for m in active_modes})
+    for base in bases:
+        non = base
+        mmd = base + "_mmd"
+        if non in active_modes and mmd in active_modes:
+            comp_rows = []
+            for model_name in summary_df["Model"].unique():
+                row_non = summary_df[(summary_df["Feature Set"] == non) & (summary_df["Model"] == model_name)]
+                row_mmd = summary_df[(summary_df["Feature Set"] == mmd) & (summary_df["Model"] == model_name)]
+                if row_non.empty or row_mmd.empty:
+                    continue
+                rn = row_non.iloc[0]
+                rm = row_mmd.iloc[0]
+                comp = {
+                    "Base": base,
+                    "Model": model_name,
+                    "Accuracy_nonmmd": rn["Accuracy"],
+                    "Accuracy_mmd": rm["Accuracy"],
+                    "Accuracy_diff": rm["Accuracy"] - rn["Accuracy"],
+                    "BalancedAcc_nonmmd": rn["Balanced Acc"],
+                    "BalancedAcc_mmd": rm["Balanced Acc"],
+                    "BalancedAcc_diff": rm["Balanced Acc"] - rn["Balanced Acc"],
+                    "MacroF1_nonmmd": rn["Macro F1"],
+                    "MacroF1_mmd": rm["Macro F1"],
+                    "MacroF1_diff": rm["Macro F1"] - rn["Macro F1"],
+                    "KeptFeatures_nonmmd": rn["Kept Features"],
+                    "KeptFeatures_mmd": rm["Kept Features"],
+                    "KeptFeatures_diff": rm["Kept Features"] - rn["Kept Features"],
+                }
+                comp_rows.append(comp)
+
+            if comp_rows:
+                comp_df = pd.DataFrame(comp_rows)
+                comp_path = os.path.join(RESULTS_PATH, f"domain_shift_comparison_{base}.csv")
+                comp_df.to_csv(comp_path, index=False)
+                comps_saved.append(comp_path)
+                print(f"\nDomain-shift comparison saved -> {comp_path}")
+                for _, r in comp_df.iterrows():
+                    print(f"  {r['Model']}: Accuracy diff={r['Accuracy_diff']:.4f}, BalancedAcc diff={r['BalancedAcc_diff']:.4f}, MacroF1 diff={r['MacroF1_diff']:.4f}")
+
     print("\nSummary table:")
     print(summary_df.sort_values(["Feature Set", "Accuracy"], ascending=[True, False]).to_string(index=False))
 
     print("\nBest model per feature set:")
-    for mode in FEATURE_MODES:
+    for mode in active_modes:
         sub = summary_df[summary_df["Feature Set"] == mode].sort_values("Accuracy", ascending=False).iloc[0]
         print(
             f"  {mode}: {sub['Model']} | acc={sub['Accuracy']:.2%} | chance={chance_by_mode[mode]:.2%} | gap={sub['Gap vs Chance']:.2%}"
@@ -196,4 +302,11 @@ def main():
     )
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Benchmark domain classifiers on enriched feature sets")
+    parser.add_argument("--arch-mode", dest="arch_mode", help="Comma-separated feature modes to run (or 'all'). Overrides ARCH_MODE env var.")
+    args = parser.parse_args()
+    try:
+        main(arch_mode=args.arch_mode)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)

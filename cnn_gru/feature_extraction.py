@@ -9,7 +9,6 @@ import matplotlib
 matplotlib.use("Agg")
 
 from scipy.signal import butter, filtfilt, find_peaks
-from scipy.stats import iqr
 from sklearn.model_selection import train_test_split
 
 
@@ -18,7 +17,7 @@ CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 128.0
-LATENT_DIM      = 16  
+LATENT_DIM      = 8  
 ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
 USE_MMD         = True
 TARGET_DATASET  = None
@@ -148,76 +147,55 @@ def _bandpass(signal, lo=0.03, hi=1.0, fs=FS, order=2):
 
 def stance_features(window, fs=FS):
     # Mapping: x(0)=Vertical, y(1)=Medio-lateral, z(2)=Antero-frontal
-    acc_v  = window[:, 0]
     acc_ml = _bandpass(window[:, 1], fs=fs)
     acc_ap = _bandpass(window[:, 2], fs=fs)
 
+    # Sway Area
     cov       = np.cov(acc_ap, acc_ml)
     det       = np.linalg.det(cov)
     sway_area = np.pi * 5.991 * np.sqrt(max(det, 0.0))
 
-    ml_std      = np.std(acc_ml)
-    ap_std      = np.std(acc_ap)
-    ml_ap_ratio = ml_std / (ap_std + 1e-8)
-    mean_cop_ap = np.mean(acc_ap)
+    # Lateral Dominance
+    ml_var = np.var(acc_ml)
+    ap_var = np.var(acc_ap)
+    lateral_dominance = ml_var / (ap_var + 1e-8)
 
+    # Spectral Power
     fft_ml = np.abs(np.fft.rfft(acc_ml)) ** 2
     freqs  = np.fft.rfftfreq(len(acc_ml), d=1.0 / fs)
     p_tot  = np.sum(fft_ml) + 1e-10
-    p_8_12 = np.sum(fft_ml[(freqs >= 8)   & (freqs <= 12)]) / p_tot
     p_sway = np.sum(fft_ml[(freqs >= 0.1) & (freqs <= 0.5)]) / p_tot
-
-    rms_v       = np.sqrt(np.mean(acc_v ** 2))
-    iqr_v       = iqr(acc_v)
-    gyro_ml_std = np.std(window[:, 4])
+    p_tremor = np.sum(fft_ml[(freqs >= 8) & (freqs <= 12)]) / p_tot
 
     return np.array([
-        sway_area, ml_std, ap_std, ml_ap_ratio, mean_cop_ap,
-        p_8_12, p_sway, rms_v, iqr_v, gyro_ml_std,
-        np.mean(np.abs(acc_ml)),
-        np.max(np.abs(acc_ml)),
+        sway_area, lateral_dominance, p_sway, p_tremor,
     ], dtype=np.float32)
 
 def walking_features(window, fs=FS):
     acc_v    = window[:, 0]
-    acc_ml   = window[:, 1]
     acc_ap   = window[:, 2]
-    gyro_mag = np.linalg.norm(window[:, 3:6], axis=1)
 
-    peaks, _ = find_peaks(acc_v, distance=int(fs * 0.3),
-                          prominence=np.std(acc_v) * 0.3)
-    n_steps  = len(peaks)
-    step_cv  = 0.0
-    if n_steps > 1:
-        intervals = np.diff(peaks) / fs
-        step_cv   = np.std(intervals) / (np.mean(intervals) + 1e-8)
-
-    jerk_mag  = np.linalg.norm(np.diff(window[:, :3], axis=0) * fs, axis=1)
+    # Jerk Magnitude
+    jerk_mag = np.linalg.norm(np.diff(window[:, :3], axis=0) * fs, axis=1)
     norm_jerk = np.sum(jerk_mag) / (len(acc_v) / fs + 1e-8)
 
+    # Step CV
+    peaks, _ = find_peaks(acc_v, distance=int(fs * 0.3),
+                          prominence=np.std(acc_v) * 0.3)
+    step_cv = 0.0
+    if len(peaks) > 1:
+        intervals = np.diff(peaks) / fs
+        step_cv = np.std(intervals) / (np.mean(intervals) + 1e-8)
+
+    # Dominant Frequency
     fft_ap = np.abs(np.fft.rfft(acc_ap))
     freqs  = np.fft.rfftfreq(len(acc_ap), d=1.0 / fs)
     valid  = (freqs > 0.5) & (freqs < 4.0)
     dom_freq = float(freqs[np.argmax(fft_ap[valid])]) if valid.any() else 0.0
 
     return np.array([
-        norm_jerk, np.mean(jerk_mag), np.std(jerk_mag),
-        step_cv, float(n_steps),
-        np.std(acc_ml), np.mean(gyro_mag), np.std(gyro_mag),
-        np.std(acc_v), dom_freq if np.isfinite(dom_freq) else 0.0,
+        norm_jerk, step_cv, dom_freq if np.isfinite(dom_freq) else 0.0,
     ], dtype=np.float32)
-
-def turning_features(window, fs=FS):
-    gyro_v   = window[:, 3] # Yaw rotation around vertical axis (0) corresponds to gyro x (3)
-    gyro_mag = np.linalg.norm(window[:, 3:6], axis=1)
-    acc_mag  = np.linalg.norm(window[:, :3], axis=1)
-    peaks, _ = find_peaks(acc_mag, distance=20, prominence=np.std(acc_mag) * 0.3)
-    return np.array([
-        np.mean(np.abs(gyro_mag)), np.std(gyro_mag),
-        np.max(np.abs(gyro_v)), float(len(peaks)),
-        np.std(acc_mag), np.mean(np.abs(np.diff(gyro_v))),
-    ], dtype=np.float32)
-
 
 # ═════════════════════════════════════════════
 # 3. PATIENT-LEVEL FEATURE EXTRACTION
@@ -236,7 +214,7 @@ def _lat_agg(rows):
     return np.concatenate([arr.mean(0), arr.std(0), arr.max(0)])
 
 def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
-                              subjects_df, enc_stance, enc_walk):
+                              subjects_df, enc_stance, enc_walk=None):
     X, y, y_4cls, dsets, sids = [], [], [], [], []
     zero_lat = np.zeros(LATENT_DIM * 3, dtype=np.float32)
 
@@ -251,28 +229,23 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
         p_win -= p_win.mean(axis=(0, 1), keepdims=True)
 
         is_stance  = ((p_meta["taskID"] == 0) | (p_meta["taskID"] == 1)).values
-        is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
-        is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
 
         has_s = is_stance.any()
-        has_w = is_walking.any()
-        has_t = is_turning.any()
 
         lat_s = _lat_agg(list(enc_stance.get_latent(p_win[is_stance]).numpy())) if has_s else None
-        lat_w = _lat_agg(list(enc_walk.get_latent(p_win[is_walking]).numpy())) if has_w else None
-        lat_t = _lat_agg(list(enc_walk.get_latent(p_win[is_turning]).numpy())) if has_t else None
 
-        lat_vec = np.concatenate([
-            [float(has_s)], lat_s if lat_s is not None else zero_lat,
-            [float(has_w)], lat_w if lat_w is not None else zero_lat,
-            [float(has_t)], lat_t if lat_t is not None else zero_lat,
-        ])
+        # Walking/turning are kept in the file for later reactivation, but the
+        # current experiment uses stance only.
+        # is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
+        # is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
 
-        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  12) if has_s else np.zeros(24, np.float32)
-        hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 10) if has_w else np.zeros(20, np.float32)
-        hc_t = _agg([turning_features(w) for w in p_win[is_turning]], 6)  if has_t else np.zeros(12, np.float32)
+        lat_vec = lat_s if lat_s is not None else zero_lat
 
-        hc_vec = np.concatenate([[float(has_s), float(has_w), float(has_t)], hc_s, hc_w, hc_t])
+        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4) if has_s else np.zeros(8, np.float32)
+
+        # hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 3) if has_w else np.zeros(6, np.float32)
+
+        hc_vec = hc_s
 
         X.append(np.concatenate([lat_vec, hc_vec]))
         y.append(float(binary_labels[m][0]))
@@ -390,13 +363,20 @@ def main():
         input_shape=input_shape, arch_mode=ARCH_MODE
     )
 
+    # Walking encoders are kept commented out for now.
+    # enc_walk = get_or_train_encoder(
+    #     task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata,
+    #     s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
+    #     input_shape=input_shape, arch_mode=ARCH_MODE
+    # )
+
     print("\nExtracting patient-level features...")
     s_fit = pd.concat([s_train, s_val]).reset_index(drop=True)
 
-    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_stance, enc_walk)
-    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_stance, enc_walk)
+    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_stance)
+    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_stance)
 
-    print(f"Full feature vector : {X_fit.shape[1]} dims")
+    print(f"Full stance-only feature vector : {X_fit.shape[1]} dims")
     print(f"Train patients      : {len(y_fit)}")
     print(f"Test patients       : {len(y_test)}")
 
@@ -427,7 +407,9 @@ def main():
     print("\nFeature extraction complete.")
     print(f"Saved -> {train_out}")
     print(f"Saved -> {test_out}")
-    print("Ready to run classifier.py for the double ablation study.")
+    # Walking/turning and secondary encoders are left here commented out for later reactivation.
+    # print("Ready to run classifier.py for the double ablation study.")
+    print("Ready to run classifier.py for the stance-only ablation study.")
 
 if __name__ == "__main__":
     main()

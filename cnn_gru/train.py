@@ -205,6 +205,15 @@ def _pairwise_multiscale_mmd(latent_batches, sigma):
     return tf.add_n(pairwise_terms) / tf.cast(len(pairwise_terms), tf.float32)
 
 
+def _generalized_mmd(latent_batches, sigma):
+    """Generalized MMD across all domains in a batch list.
+
+    This returns the mean pairwise MMD over every domain pair, so a batch with
+    D domains yields D*(D-1)/2 comparisons.
+    """
+    return _pairwise_multiscale_mmd(latent_batches, sigma)
+
+
 def _batched_dataset(array, batch_size):
     return tf.data.Dataset.from_tensor_slices(array).batch(batch_size)
 
@@ -249,10 +258,11 @@ def train_autoencoder_mmd(model, x_source, x_target, x_val_source, x_val_target,
                           checkpoint_path, weights_filename="best_ae_mmd.weights.h5",
                           lambda_mmd=0.01, sigma=None, epochs=100, batch_size=64,
                           learning_rate=3e-4, clipnorm=1.0):
-    """Train an autoencoder with an added MMD penalty between source and target encodings.
+    """Train an autoencoder with a generalized MMD penalty.
 
-    x_source / x_target are numpy arrays of windows from source and target domains.
-    Validation arrays are optional but recommended (pass empty arrays to skip val check).
+    If x_source is a list of domain arrays and x_target is None, the loss aligns
+    all source domains simultaneously by averaging pairwise MMD terms.
+    Otherwise the classic source-vs-target setup is used.
     """
     opt = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
 
@@ -310,7 +320,7 @@ def train_autoencoder_mmd(model, x_source, x_target, x_val_source, x_val_target,
         if multi_domain:
             latent_terms = _collect_normalized_latents(model, val_source_groups, batch_size=batch_size, training=False)
             loss_rec_v = float(_mean_reconstruction_loss(model, val_source_groups, batch_size=batch_size).numpy())
-            loss_m_v = float(_pairwise_multiscale_mmd(latent_terms, sigma).numpy())
+            loss_m_v = float(_generalized_mmd(latent_terms, sigma).numpy())
             return loss_rec_v + lambda_mmd * loss_m_v
 
         if len(val_target_groups) == 0:
@@ -349,7 +359,7 @@ def train_autoencoder_mmd(model, x_source, x_target, x_val_source, x_val_target,
                             latent_batches.append(normalize_latents(model.encoder(batch, training=True)))
 
                     loss_rec = tf.add_n(rec_terms) / tf.cast(len(rec_terms), tf.float32)
-                    loss_m = _pairwise_multiscale_mmd(latent_batches, sigma)
+                    loss_m = _generalized_mmd(latent_batches, sigma)
                     total = loss_rec + lambda_mmd * loss_m
 
                 grads = tape.gradient(total, model.trainable_variables)
@@ -388,10 +398,11 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
                           checkpoint_path=None, weights_filename="best_clf_mmd.weights.h5",
                           lambda_mmd=0.1, sigma=None, epochs=50, batch_size=64,
                           learning_rate=1e-4, clipnorm=1.0):
-    """Train a classifier model minimizing classification loss on source
-    plus an MMD penalty between source and target latents.
+    """Train a classifier model with generalized MMD regularization.
 
-    x_target may be unlabeled; only used to compute MMD.
+    When x_source and y_source are lists of domain groups and x_target is None,
+    the classifier is trained across all source domains at once and the MMD term
+    is the mean of all pairwise domain distances.
     """
     opt = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -415,7 +426,7 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
         source_array = np.asarray(source_groups[0])
         label_array = np.asarray(label_groups[0]) if label_groups else np.asarray(y_source)
         if len(target_groups) == 0:
-            target_groups = [source_array[1::2] if len(source_array) > 1 else source_array]
+            raise ValueError("x_target must contain at least one target group when x_source is not multi-domain.")
 
         ds_s = tf.data.Dataset.from_tensor_slices((source_array, label_array)).shuffle(1024).batch(batch_size).repeat()
         ds_targets = [tf.data.Dataset.from_tensor_slices(group).shuffle(1024).batch(batch_size).repeat() for group in target_groups]
@@ -463,7 +474,7 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
                         latent_batches.append(normalize_latents(model.get_latent(x_batch, training=True)))
 
                     cls_loss = tf.add_n(cls_losses) / tf.cast(len(cls_losses), tf.float32)
-                    loss_m = _pairwise_multiscale_mmd(latent_batches, sigma)
+                    loss_m = _generalized_mmd(latent_batches, sigma)
                     total = cls_loss + lambda_mmd * loss_m
 
                 grads = tape.gradient(total, model.trainable_variables)

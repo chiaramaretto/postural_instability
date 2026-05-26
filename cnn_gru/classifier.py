@@ -15,16 +15,16 @@ from sklearn.feature_selection import VarianceThreshold, RFE
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-ARCH_MODE       = "classifier_mmd"  # set manually: "autoencoder", "classifier", or "classifier_mmd"
-LATENT_DIM      = 16 
+ARCH_MODE       = "classifier"  # set manually: "autoencoder", "classifier", or "classifier_mmd"
+LATENT_DIM      = 8
 
 # ═════════════════════════════════════════════
 # 1. SETUP & CLASSIFIER DICTIONARY
 # ═════════════════════════════════════════════
 
 def split_lat_hc(X):
-    # Reverse engineer the feature subsets based on the known latent dimension block
-    lat_block = 3 * (1 + LATENT_DIM * 3)  # 147
+    # Stance-only features: latent mean/std/max (3 * LATENT_DIM) + handcrafted stance features
+    lat_block = 3 * LATENT_DIM  # 24 when LATENT_DIM = 8
     return X[:, :lat_block], X[:, lat_block:]
 
 def apply_variance_threshold(Xtr, Xte):
@@ -36,11 +36,11 @@ def apply_variance_threshold(Xtr, Xte):
 def get_classifiers():
     return {
         "RandomForest": RandomForestClassifier(
-            n_estimators=200, max_depth=10, min_samples_leaf=3, 
+            n_estimators=100, max_depth=6, min_samples_leaf=3, 
             class_weight="balanced", random_state=42, n_jobs=-1
         ),
         "GradientBoosting": GradientBoostingClassifier(
-            n_estimators=100, max_depth=4, random_state=42
+            n_estimators=100, max_depth=3, random_state=42
         ),
         "SVM": SVC(
             kernel='rbf', probability=True, class_weight='balanced', random_state=42
@@ -90,7 +90,7 @@ def main():
 
     # --- FEATURE SELECTION: RECURSIVE FEATURE ELIMINATION (RFE) ---
     print("\nPerforming Recursive Feature Elimination (RFE) on Combined set...")
-    rfe_estimator = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    rfe_estimator = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42, n_jobs=-1)
     rfe = RFE(estimator=rfe_estimator, n_features_to_select=30, step=5)
     X_fit_rfe = rfe.fit_transform(X_fit_full_f, y_fit)
     X_test_rfe = rfe.transform(X_test_full_f)
