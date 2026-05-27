@@ -205,6 +205,52 @@ def _pairwise_multiscale_mmd(latent_batches, sigma):
     return tf.add_n(pairwise_terms) / tf.cast(len(pairwise_terms), tf.float32)
 
 
+def _conditional_pairwise_multiscale_mmd(latent_batches, label_batches, sigma):
+    """Compute MMD only between batches that share the same class label.
+
+    For each pair of domains, we intersect the class labels present in both
+    batches and average the same-class MMD terms. This keeps the alignment
+    label-aware without changing the batch construction.
+    """
+    if len(latent_batches) < 2:
+        return tf.constant(0.0, dtype=latent_batches[0].dtype)
+
+    pairwise_terms = []
+    for first_idx, second_idx in combinations(range(len(latent_batches)), 2):
+        first_latents = latent_batches[first_idx]
+        second_latents = latent_batches[second_idx]
+
+        first_labels = np.asarray(label_batches[first_idx]).reshape(-1)
+        second_labels = np.asarray(label_batches[second_idx]).reshape(-1)
+        common_classes = sorted(set(first_labels.tolist()).intersection(set(second_labels.tolist())))
+
+        if not common_classes:
+            continue
+
+        class_terms = []
+        for class_id in common_classes:
+            class_mask_first = tf.equal(tf.reshape(tf.cast(label_batches[first_idx], tf.int32), [-1]), int(class_id))
+            class_mask_second = tf.equal(tf.reshape(tf.cast(label_batches[second_idx], tf.int32), [-1]), int(class_id))
+
+            same_class_first = tf.boolean_mask(first_latents, class_mask_first)
+            same_class_second = tf.boolean_mask(second_latents, class_mask_second)
+
+            class_terms.append(
+                mmd_loss_multiscale(
+                    same_class_first,
+                    same_class_second,
+                    sigmas=None if sigma is None else [sigma / 10.0, sigma, sigma * 10.0],
+                )
+            )
+
+        pairwise_terms.append(tf.add_n(class_terms) / tf.cast(len(class_terms), tf.float32))
+
+    if not pairwise_terms:
+        return tf.constant(0.0, dtype=latent_batches[0].dtype)
+
+    return tf.add_n(pairwise_terms) / tf.cast(len(pairwise_terms), tf.float32)
+
+
 def _generalized_mmd(latent_batches, sigma):
     """Generalized MMD across all domains in a batch list.
 
@@ -398,11 +444,11 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
                           checkpoint_path=None, weights_filename="best_clf_mmd.weights.h5",
                           lambda_mmd=0.1, sigma=None, epochs=50, batch_size=64,
                           learning_rate=1e-4, clipnorm=1.0):
-    """Train a classifier model with generalized MMD regularization.
+    """Train a classifier model with label-aware MMD regularization.
 
     When x_source and y_source are lists of domain groups and x_target is None,
     the classifier is trained across all source domains at once and the MMD term
-    is the mean of all pairwise domain distances.
+    is computed only between samples that share the same class label.
     """
     opt = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -474,7 +520,7 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
                         latent_batches.append(normalize_latents(model.get_latent(x_batch, training=True)))
 
                     cls_loss = tf.add_n(cls_losses) / tf.cast(len(cls_losses), tf.float32)
-                    loss_m = _generalized_mmd(latent_batches, sigma)
+                    loss_m = _conditional_pairwise_multiscale_mmd(latent_batches, [y_batch for _, y_batch in batches], sigma)
                     total = cls_loss + lambda_mmd * loss_m
 
                 grads = tape.gradient(total, model.trainable_variables)

@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 FEATURE_PREFIX = "train_features_enriched_"
-ARCH_MODE = "autoencoder" 
+ARCH_MODE = "autoencoder"  # "autoencoder", "classifier", "classifier_mmd"
 def discover_feature_modes(checkpoint_path=CHECKPOINT_PATH):
     modes = []
     for fname in os.listdir(checkpoint_path):

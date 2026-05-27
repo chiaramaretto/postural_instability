@@ -16,7 +16,7 @@ from sklearn.preprocessing import StandardScaler
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-ARCH_MODE       = "autoencoder_mmd"  # "autoencoder" or "classifier"_
+ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"_
 LATENT_DIM      = 8
 
 # ═════════════════════════════════════════════
