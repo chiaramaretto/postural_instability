@@ -13,11 +13,10 @@ from sklearn.metrics import (
 )
 from sklearn.feature_selection import VarianceThreshold, RFE
 from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-ARCH_MODE       = "autoencoder" 
+ARCH_MODE       = "autoencoder_mmd"  # "autoencoder" or "classifier"_
 LATENT_DIM      = 8
 
 # ═════════════════════════════════════════════
@@ -26,15 +25,8 @@ LATENT_DIM      = 8
 
 def split_lat_hc(X):
     # Stance + walking: latent mean/std/max for stance and walking blocks
-    lat_block = 2 * (3 * LATENT_DIM)  # 48 when LATENT_DIM = 8
+    lat_block = 2 * (4 * LATENT_DIM)  # 64 when LATENT_DIM = 8
     return X[:, :lat_block], X[:, lat_block:]
-
-
-def apply_mean_imputation(Xtr, Xte):
-    imputer = SimpleImputer(strategy="mean")
-    Xtr_i = imputer.fit_transform(Xtr)
-    Xte_i = imputer.transform(Xte)
-    return Xtr_i, Xte_i
 
 def apply_variance_threshold(Xtr, Xte):
     v = VarianceThreshold(threshold=1e-6)
@@ -95,17 +87,14 @@ def main():
     X_fit = train_df[feat_cols].values
     X_test = test_df[feat_cols].values
 
-    # Mean imputation fitted on train only, then applied to test
-    X_fit_imp, X_test_imp = apply_mean_imputation(X_fit, X_test)
-
     # Split into Ablation Subsets
-    X_fit_lat,  X_fit_hc  = split_lat_hc(X_fit_imp)
-    X_test_lat, X_test_hc = split_lat_hc(X_test_imp)
+    X_fit_lat,  X_fit_hc  = split_lat_hc(X_fit)
+    X_test_lat, X_test_hc = split_lat_hc(X_test)
 
     # Filter zero-variance features
     X_fit_lat_f,  X_test_lat_f  = apply_variance_threshold(X_fit_lat,  X_test_lat)
     X_fit_hc_f,   X_test_hc_f   = apply_variance_threshold(X_fit_hc,   X_test_hc)
-    X_fit_full_f, X_test_full_f = apply_variance_threshold(X_fit_imp,   X_test_imp)
+    X_fit_full_f, X_test_full_f = apply_variance_threshold(X_fit,   X_test)
 
     # Z-score scaling fitted on train only and then applied to test
     X_fit_lat_s,  X_test_lat_s  = apply_z_scaling(X_fit_lat_f,  X_test_lat_f)

@@ -18,7 +18,7 @@ RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8  
-ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
+ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"
 USE_MMD         = True
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.1
@@ -210,13 +210,25 @@ def _agg(rows, n_feat):
 def _lat_agg(rows):
     if len(rows) == 0:
         return None
-    arr = np.array(rows, dtype=np.float32)
-    return np.concatenate([arr.mean(0), arr.std(0), arr.max(0)])
+    arr = np.array(rows, dtype=np.float32)  # shape: (n_windows, latent_dim)
+
+    # Trend: slope of a linear regression for each latent dimension.
+    # Captures whether each dimension increases, decreases, or stays stable over time.
+    n = arr.shape[0]
+    if n >= 3:
+        t = np.arange(n, dtype=np.float32)
+        t_centered = t - t.mean()
+        t_var = np.dot(t_centered, t_centered) + 1e-8
+        slopes = np.dot(t_centered, arr) / t_var
+    else:
+        slopes = np.zeros(arr.shape[1], dtype=np.float32)
+
+    return np.concatenate([arr.mean(0), arr.std(0), arr.max(0), slopes])
 
 def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
                               subjects_df, enc_stance, enc_walk=None):
     X, y, y_4cls, dsets, sids = [], [], [], [], []
-    nan_lat = np.full(LATENT_DIM * 3, np.nan, dtype=np.float32)
+    nan_lat = np.full(LATENT_DIM * 4, np.nan, dtype=np.float32)
     nan_hc_s = np.full(8, np.nan, dtype=np.float32)
     nan_hc_w = np.full(6, np.nan, dtype=np.float32)
 
@@ -229,6 +241,7 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
         p_win  = windows[m].astype("float32")
         p_meta = metadata[m].reset_index(drop=True)
         p_win -= p_win.mean(axis=(0, 1), keepdims=True)
+        p_win = p_win / (p_win.std(axis=(0, 1), keepdims=True) + 1e-8)
 
         is_stance  = ((p_meta["taskID"] == 0) | (p_meta["taskID"] == 1)).values
         is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
@@ -389,6 +402,50 @@ def main():
     test_df["y_true_4cls"] = y_test_4cls
     test_df["dataset"] = dsets_test
     test_df["subjectID"] = sids_test
+
+    # -------------------------
+    # Group-wise mean imputation for all Feat_* columns (fit on training only)
+    # -------------------------
+    feat_cols = [c for c in train_df.columns if c.startswith("Feat_")]
+    print(f"Imputing missing features for {len(feat_cols)} Feat_* columns using training-group means.")
+
+    # Compute per-label means on the training set (ignore NaNs)
+    train_group_means = {}
+    global_means = train_df[feat_cols].mean(skipna=True)
+    for label in train_df["y_true"].unique():
+        mask = train_df["y_true"] == label
+        # compute column-wise mean for this label (skip NaNs)
+        grp = train_df.loc[mask, feat_cols]
+        grp_mean = grp.mean(skipna=True)
+        # fallback to global mean for any columns that remain NaN in grp_mean
+        grp_mean_filled = grp_mean.fillna(global_means)
+        train_group_means[label] = grp_mean_filled
+
+    # Impute training set (fill NaNs using its group's means)
+    train_df_imputed = train_df.copy()
+    n_before = train_df_imputed[feat_cols].isna().sum().sum()
+    for label, mean_vals in train_group_means.items():
+        mask = train_df_imputed["y_true"] == label
+        train_df_imputed.loc[mask, feat_cols] = train_df_imputed.loc[mask, feat_cols].fillna(mean_vals)
+    n_after = train_df_imputed[feat_cols].isna().sum().sum()
+    print(f"Training NaNs before: {n_before}, after imputation: {n_after}")
+
+    # Ensure no remaining NaNs in training (fill any remaining with global means)
+    train_df_imputed[feat_cols] = train_df_imputed[feat_cols].fillna(global_means)
+
+    # Apply the same train-group means to test set (no fitting on test)
+    test_df_imputed = test_df.copy()
+    n_before_test = test_df_imputed[feat_cols].isna().sum().sum()
+    for label, mean_vals in train_group_means.items():
+        mask = test_df_imputed["y_true"] == label
+        test_df_imputed.loc[mask, feat_cols] = test_df_imputed.loc[mask, feat_cols].fillna(mean_vals)
+    # fallback global mean
+    test_df_imputed[feat_cols] = test_df_imputed[feat_cols].fillna(global_means)
+    n_after_test = test_df_imputed[feat_cols].isna().sum().sum()
+    print(f"Test NaNs before: {n_before_test}, after imputation: {n_after_test}")
+
+    train_df = train_df_imputed
+    test_df = test_df_imputed
 
     train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{ARCH_MODE}.csv")
     test_out = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{ARCH_MODE}.csv")
