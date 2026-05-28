@@ -442,7 +442,7 @@ def train_autoencoder_mmd(model, x_source, x_target, x_val_source, x_val_target,
 def train_classifier_mmd(model, x_source, y_source, x_target,
                           x_val_source=None, y_val_source=None,
                           checkpoint_path=None, weights_filename="best_clf_mmd.weights.h5",
-                          lambda_mmd=0.1, sigma=None, epochs=50, batch_size=64,
+                          lambda_mmd=0.01, sigma=None, epochs=50, batch_size=64,
                           learning_rate=1e-4, clipnorm=1.0):
     """Train a classifier model with label-aware MMD regularization.
 
@@ -513,14 +513,16 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
                 batches = [next(domain_iter) for domain_iter in iters]
                 cls_losses = []
                 latent_batches = []
+                label_batches = []
                 with tf.GradientTape() as tape:
                     for x_batch, y_batch in batches:
                         logits = model(x_batch, training=True)
                         cls_losses.append(loss_fn(y_batch, logits))
                         latent_batches.append(normalize_latents(model.get_latent(x_batch, training=True)))
+                        label_batches.append(y_batch)
 
                     cls_loss = tf.add_n(cls_losses) / tf.cast(len(cls_losses), tf.float32)
-                    loss_m = _conditional_pairwise_multiscale_mmd(latent_batches, [y_batch for _, y_batch in batches], sigma)
+                    loss_m = _conditional_pairwise_multiscale_mmd(latent_batches, label_batches, sigma)
                     total = cls_loss + lambda_mmd * loss_m
 
                 grads = tape.gradient(total, model.trainable_variables)
@@ -563,7 +565,24 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
         # simple val check on source validation if provided
         if x_val_source is not None and y_val_source is not None and len(x_val_source) > 0:
             if multi_domain:
-                val_loss = float(_mean_classification_loss(model, _as_group_list(x_val_source), _as_group_list(y_val_source), loss_fn, batch_size=batch_size).numpy())
+                val_cls_loss = _mean_classification_loss(model, _as_group_list(x_val_source), _as_group_list(y_val_source), loss_fn, batch_size=batch_size)
+
+                val_latent_batches = []
+                val_label_batches = []
+                for x_group, y_group in zip(_as_group_list(x_val_source), _as_group_list(y_val_source)):
+                    group_latents = []
+                    for x_batch, y_batch in _batched_dataset((x_group, y_group), batch_size):
+                        try:
+                            latent = model.get_latent(x_batch, training=False)
+                        except AttributeError:
+                            latent = model.encoder(x_batch, training=False)
+                        group_latents.append(normalize_latents(latent))
+                    if group_latents:
+                        val_latent_batches.append(tf.concat(group_latents, axis=0))
+                        val_label_batches.append(np.asarray(y_group))
+
+                val_mmd_loss = _conditional_pairwise_multiscale_mmd(val_latent_batches, val_label_batches, sigma) if len(val_latent_batches) > 1 else tf.constant(0.0, dtype=tf.float32)
+                val_loss = float((val_cls_loss + lambda_mmd * val_mmd_loss).numpy())
             else:
                 val_x = np.asarray(x_val_source)
                 val_y = np.asarray(y_val_source)
@@ -576,7 +595,7 @@ def train_classifier_mmd(model, x_source, y_source, x_target,
         else:
             val_loss = float('inf')
 
-        print(f"Epoch {ep}/{epochs} — cls: {epoch_cls:.6f}, mmd: {epoch_mmd:.6f}, total: {epoch_tot:.6f}, val_cls: {val_loss:.6f}")
+        print(f"Epoch {ep}/{epochs} — cls: {epoch_cls:.6f}, mmd: {epoch_mmd:.6f}, total: {epoch_tot:.6f}, val_total: {val_loss:.6f}")
         if val_loss < best_val:
             best_val = val_loss
             model.save_weights(full_path)

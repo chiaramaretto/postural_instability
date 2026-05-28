@@ -16,7 +16,7 @@ from sklearn.preprocessing import StandardScaler
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"_
+ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"_
 LATENT_DIM      = 8
 
 # ═════════════════════════════════════════════
@@ -180,12 +180,8 @@ def main():
                     "Feature Set": feat_name,
                     "Dataset": dataset_name,
                     "Test Samples": int(ds_mask.sum()),
-                    "Accuracy": round(accuracy_score(ds_y_true, ds_y_pred), 4),
                     "Balanced Acc": round(balanced_accuracy_score(ds_y_true, ds_y_pred), 4),
-                    "Precision": round(precision_score(ds_y_true, ds_y_pred, zero_division=0), 4),
-                    "Recall": round(recall_score(ds_y_true, ds_y_pred, zero_division=0), 4),
                     "Macro F1": round(f1_score(ds_y_true, ds_y_pred, average="macro", zero_division=0), 4),
-                    "ROC-AUC": round(roc_auc_score(ds_y_true, ds_prob), 4) if len(np.unique(ds_y_true)) > 1 else float("nan"),
                 })
 
     # ═════════════════════════════════════════════

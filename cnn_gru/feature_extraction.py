@@ -18,10 +18,10 @@ RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8  
-ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
+ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"
 USE_MMD         = True
 TARGET_DATASET  = None
-LAMBDA_MMD      = 0.1
+LAMBDA_MMD      = 0.01
 
 
 # ═════════════════════════════════════════════
