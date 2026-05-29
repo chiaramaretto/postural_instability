@@ -19,9 +19,22 @@ RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8  
 ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"
-USE_MMD         = True
+USE_MMD         = False
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.01
+
+
+def _format_lambda_tag(lambda_mmd):
+    return f"lambda_{lambda_mmd:.3f}".replace(".", "p")
+
+
+def build_mmd_suffix(lambda_mmd=None):
+    lambda_value = LAMBDA_MMD if lambda_mmd is None else lambda_mmd
+    suffix_parts = ["_mmd"]
+    if TARGET_DATASET:
+        suffix_parts.append(str(TARGET_DATASET))
+    suffix_parts.append(_format_lambda_tag(lambda_value))
+    return "_".join(suffix_parts)
 
 
 # ═════════════════════════════════════════════
@@ -291,7 +304,7 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
 
     # If MMD is enabled, prefer a separate weights filename with _mmd suffix
     if USE_MMD:
-        suffix = f"_mmd_{TARGET_DATASET}" if TARGET_DATASET else "_mmd"
+        suffix = build_mmd_suffix()
         weights_mmd = weights_filename.replace('.weights.h5', f'{suffix}.weights.h5')
         weights_filename_mmd = weights_mmd
         full_path = os.path.join(CHECKPOINT_PATH, weights_filename_mmd)
@@ -450,7 +463,7 @@ def main():
     train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{ARCH_MODE}.csv")
     test_out = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{ARCH_MODE}.csv")
     if USE_MMD:
-        suffix = f"_mmd_{TARGET_DATASET}" if TARGET_DATASET else "_mmd"
+        suffix = build_mmd_suffix()
         train_out = train_out.replace('.csv', f'{suffix}.csv')
         test_out = test_out.replace('.csv', f'{suffix}.csv')
     

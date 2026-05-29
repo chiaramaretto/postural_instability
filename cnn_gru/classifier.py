@@ -16,8 +16,9 @@ from sklearn.preprocessing import StandardScaler
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"_
+ARCH_MODE       = "classifier_mmd"  # "autoencoder" or "classifier"_
 LATENT_DIM      = 8
+FEATURE_PREFIX   = "train_features_enriched_"
 
 # ═════════════════════════════════════════════
 # 1. SETUP & CLASSIFIER DICTIONARY
@@ -58,17 +59,51 @@ def get_classifiers():
         )
     }
 
+
+def discover_feature_mode(checkpoint_path=CHECKPOINT_PATH, preferred_modes=None):
+    preferred_modes = preferred_modes or [ARCH_MODE, "classifier", "autoencoder"]
+    available_modes = []
+
+    for fname in os.listdir(checkpoint_path):
+        if not fname.startswith(FEATURE_PREFIX) or not fname.endswith(".csv"):
+            continue
+
+        mode = fname[len(FEATURE_PREFIX):-4]
+        train_path = os.path.join(checkpoint_path, f"train_features_enriched_{mode}.csv")
+        test_path = os.path.join(checkpoint_path, f"test_features_enriched_{mode}.csv")
+        if os.path.exists(train_path) and os.path.exists(test_path):
+            available_modes.append(mode)
+
+    if not available_modes:
+        raise FileNotFoundError("No enriched feature CSV pairs found in the models folder.")
+
+    for preferred in preferred_modes:
+        for mode in available_modes:
+            if mode == preferred or mode.startswith(preferred):
+                return mode
+
+    return sorted(available_modes)[0]
+
+
+def binary_confusion_stats(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
+    hc_recall = tn / (tn + fp + 1e-8)
+    pd_recall = tp / (tp + fn + 1e-8)
+    return tn, fp, fn, tp, hc_recall, pd_recall
+
 # ═════════════════════════════════════════════
 # 2. EVALUATION PIPELINE
 # ═════════════════════════════════════════════
 
 def main():
     os.makedirs(RESULTS_PATH, exist_ok=True)
-    
-    train_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{ARCH_MODE}.csv")
-    test_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{ARCH_MODE}.csv")
 
-    print(f"Loading enriched features from disk ({ARCH_MODE})...")
+    arch_mode = discover_feature_mode(CHECKPOINT_PATH)
+    train_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{arch_mode}.csv")
+    test_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{arch_mode}.csv")
+
+    print(f"Loading enriched features from disk ({arch_mode})...")
     train_df = pd.read_csv(train_path)
     test_df = pd.read_csv(test_path)
 
@@ -173,13 +208,19 @@ def main():
 
                 ds_y_true = y_test[ds_mask]
                 ds_y_pred = y_pred[ds_mask]
-                ds_prob = y_prob[ds_mask]
+                tn, fp, fn, tp, hc_recall, pd_recall = binary_confusion_stats(ds_y_true, ds_y_pred)
 
                 dataset_results.append({
                     "Classifier": clf_name,
                     "Feature Set": feat_name,
                     "Dataset": dataset_name,
                     "Test Samples": int(ds_mask.sum()),
+                    "TN": int(tn),
+                    "FP": int(fp),
+                    "FN": int(fn),
+                    "TP": int(tp),
+                    "HC Recall": round(hc_recall, 4),
+                    "PD Recall": round(pd_recall, 4),
                     "Balanced Acc": round(balanced_accuracy_score(ds_y_true, ds_y_pred), 4),
                     "Macro F1": round(f1_score(ds_y_true, ds_y_pred, average="macro", zero_division=0), 4),
                 })
