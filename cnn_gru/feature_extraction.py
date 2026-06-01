@@ -1,11 +1,10 @@
 import argparse
-from model import CnnGru, ImuEncoder
+import sys
 import os
+from model import CnnGru, ImuEncoder
 
 import matplotlib
-
 matplotlib.use("Agg")
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -23,9 +22,9 @@ CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
-LATENT_DIM      = 8  
-ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"
-USE_MMD        = False
+LATENT_DIM      = 8
+ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
+USE_MMD         = False
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.01
 LAMBDA_VALUES   = [0.001, 0.005, 0.01]
@@ -64,7 +63,10 @@ def make_umap_plot(df, output_dir, mode_tag):
     if not feat_cols:
         raise ValueError("No Feat_* columns available for UMAP plotting.")
 
-    latent_values = df[feat_cols].to_numpy(dtype=np.float32)
+    # Select only latent-derived features (stance + walk latent aggregations)
+    n_latent_cols = 4 * LATENT_DIM * 2  # mean,std,max,slopes for stance and walk
+    lat_cols = feat_cols[:n_latent_cols] if len(feat_cols) >= n_latent_cols else feat_cols
+    latent_values = df[lat_cols].to_numpy(dtype=np.float32)
     reducer = umap.UMAP(n_components=2, random_state=RANDOM_STATE)
     embedding = reducer.fit_transform(latent_values)
 
@@ -114,12 +116,13 @@ def make_umap_plot(df, output_dir, mode_tag):
 # 1. DATA LOADING AND SPLITTING
 # ═════════════════════════════════════════════
 
+
 def load_data():
     windows      = np.load(os.path.join(DATA_PATH, "windows.npy"))
     labels_raw   = np.load(os.path.join(DATA_PATH, "labels.npy")).astype(np.float32)
     metadata     = pd.read_csv(os.path.join(DATA_PATH, "metadata.csv"))
 
-    labels_4cls  = np.clip(labels_raw, 0, 3).astype(np.int32) 
+    labels_4cls  = np.clip(labels_raw, 0, 3).astype(np.int32)
     binary_labels = (labels_4cls >= 1).astype(np.float32)
 
     print(f"Windows        : {windows.shape}")
@@ -167,9 +170,9 @@ def patient_split(metadata, binary_labels):
         if len(cls) < 3:
             train_list.append(cls)
             continue
-    
+
         s_trval, s_test = train_test_split(cls, test_size=0.25, random_state=RANDOM_STATE)
-        s_tr, s_val     = train_test_split(s_trval, test_size=0.3, random_state=RANDOM_STATE)
+        s_tr, s_val     = train_test_split(s_trval, test_size=0.2, random_state=RANDOM_STATE)
         train_list.append(s_tr)
         val_list.append(s_val)
         test_list.append(s_test)
@@ -221,6 +224,7 @@ def ensure_validation_domain_coverage(s_train, s_val):
 # ═════════════════════════════════════════════
 # 2. HANDCRAFTED FEATURES
 # ═════════════════════════════════════════════
+
 
 def _bandpass(signal, lo=0.03, hi=1.0, fs=FS, order=2):
     nyq  = 0.5 * fs
@@ -283,9 +287,11 @@ def walking_features(window, fs=FS):
         norm_jerk, step_cv, dom_freq if np.isfinite(dom_freq) else 0.0,
     ], dtype=np.float32)
 
+
 # ═════════════════════════════════════════════
 # 3. PATIENT-LEVEL FEATURE EXTRACTION
 # ═════════════════════════════════════════════
+
 
 def _agg(rows, n_feat):
     if len(rows) == 0:
@@ -389,9 +395,6 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
         lat_s = _lat_agg(list(enc_stance.get_latent(p_win[is_stance]).numpy())) if has_s else nan_lat
         lat_w = _lat_agg(list(enc_walk.get_latent(p_win[is_walking]).numpy())) if (has_w and enc_walk is not None) else nan_lat
 
-        # Turning is kept commented for later use.
-        # is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
-
         lat_vec = np.concatenate([lat_s, lat_w])
 
         hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4) if has_s else nan_hc_s
@@ -407,9 +410,11 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
 
     return np.stack(X), np.array(y), np.array(y_4cls), np.array(dsets), np.array(sids)
 
+
 # ═════════════════════════════════════════════
 # 4. ENCODER TRAINING
 # ═════════════════════════════════════════════
+
 
 def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_val, 
                          task_filter_fn, input_shape, arch_mode):
@@ -488,13 +493,24 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
     
     return model
 
+
 # ═════════════════════════════════════════════
 # 5. MAIN (FEATURE EXTRACTION ONLY)
 # ═════════════════════════════════════════════
 
-def main():
+
+def main(arch_mode=None, use_mmd=None, lambda_mmd=None):
     os.makedirs(CHECKPOINT_PATH, exist_ok=True)
     os.makedirs(RESULTS_PATH, exist_ok=True)
+
+    global ARCH_MODE, USE_MMD, LAMBDA_MMD
+    # override globals if parameters provided
+    if arch_mode is not None:
+        ARCH_MODE = arch_mode
+    if use_mmd is not None:
+        USE_MMD = use_mmd
+    if lambda_mmd is not None:
+        LAMBDA_MMD = lambda_mmd
 
     print("Loading datasets...")
     windows, labels_4cls, binary_labels, metadata = load_data()
@@ -593,10 +609,61 @@ def main():
     train_df.to_csv(train_out, index=False)
     test_df.to_csv(test_out, index=False)
     
+    # Export latent trajectories per-subject (fit and test) and save UMAPs per run
+    mmd_tag = build_mmd_suffix() if USE_MMD else ""
+    # latent export: fit subjects
+    try:
+        latent_df_fit, latent_fit_path = export_latent_trajectories(windows, metadata, s_fit, enc_stance, enc_walk, output_tag=mmd_tag + "_fit")
+    except Exception as e:
+        print(f"Warning: failed to export latent trajectories (fit): {e}")
+        latent_fit_path = None
+
+    # latent export: test subjects
+    try:
+        latent_df_test, latent_test_path = export_latent_trajectories(windows, metadata, s_test, enc_stance, enc_walk, output_tag=mmd_tag + "_test")
+    except Exception as e:
+        print(f"Warning: failed to export latent trajectories (test): {e}")
+        latent_test_path = None
+
+    # Make UMAP plots for train and test feature CSVs
+    try:
+        full_df = pd.concat([train_df, test_df], ignore_index=True)
+        umap_tag_full = f"{ARCH_MODE}{mmd_tag}"
+        umap_path_full = make_umap_plot(full_df, RESULTS_PATH, umap_tag_full)
+        print(f"UMAP saved -> {umap_path_full}")
+    except Exception as e:
+        print(f"Warning: failed to create UMAP: {e}")
+
     print("\nFeature extraction complete.")
     print(f"Saved -> {train_out}")
     print(f"Saved -> {test_out}")
     print("Ready to run classifier.py for the double ablation study.")
 
+
+def run_automated_sweep(arch_mode=None):
+    """Run baseline (no MMD) then each value in LAMBDA_VALUES with MMD.
+    Saves features, latent CSVs and UMAP PNGs for each run.
+    """
+    print('\n=== Automated sweep: baseline (no MMD) ===')
+    main(arch_mode=arch_mode, use_mmd=False, lambda_mmd=None)
+
+    for v in LAMBDA_VALUES:
+        print(f'\n=== Automated sweep: MMD lambda={v} ===')
+        main(arch_mode=arch_mode, use_mmd=True, lambda_mmd=v)
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Feature extraction and optional sweep runner")
+    parser.add_argument("--arch-mode", choices=["autoencoder", "classifier"], help="Architecture mode to run")
+    parser.add_argument("--lambda-mmd", type=float, help="Single lambda_mmd value to run with MMD enabled")
+    parser.add_argument("--use-mmd", action="store_true", help="Enable MMD for a single run")
+    parser.add_argument("--auto-sweep", action="store_true", help="Run baseline + sweep over LAMBDA_VALUES automatically")
+    args = parser.parse_args()
+
+    # If no CLI parameters are provided, run the automated sweep by default.
+    if len(sys.argv) == 1 or args.auto_sweep:
+        run_automated_sweep(arch_mode=args.arch_mode)
+    else:
+        lam = args.lambda_mmd if args.lambda_mmd is not None else None
+        use_mmd_flag = bool(args.use_mmd)
+        main(arch_mode=args.arch_mode, use_mmd=use_mmd_flag, lambda_mmd=lam)
