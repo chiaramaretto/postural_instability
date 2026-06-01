@@ -1,12 +1,18 @@
-import tensorflow as tf
+import argparse
 from model import CnnGru, ImuEncoder
-from train import train, train_autoencoder
-from train import train_autoencoder_mmd
 import os
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
+import tensorflow as tf
+
+from train import train, train_autoencoder
+from train import train_autoencoder_mmd
 
 from scipy.signal import butter, filtfilt, find_peaks
 from sklearn.model_selection import train_test_split
@@ -19,9 +25,24 @@ RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8  
 ARCH_MODE       = "classifier"  # "autoencoder" or "classifier"
-USE_MMD         = False
+USE_MMD        = False
 TARGET_DATASET  = None
 LAMBDA_MMD      = 0.01
+LAMBDA_VALUES   = [0.001, 0.005, 0.01]
+
+
+def _lazy_import_umap():
+    try:
+        import umap  # type: ignore
+        return umap
+    except ImportError as first_error:
+        try:
+            import umap.umap_ as umap  # type: ignore
+            return umap
+        except ImportError:
+            raise ImportError(
+                "UMAP is not installed. Install `umap-learn` in the active environment to run this analysis."
+            ) from first_error
 
 
 def _format_lambda_tag(lambda_mmd):
@@ -35,6 +56,58 @@ def build_mmd_suffix(lambda_mmd=None):
         suffix_parts.append(str(TARGET_DATASET))
     suffix_parts.append(_format_lambda_tag(lambda_value))
     return "_".join(suffix_parts)
+
+
+def make_umap_plot(df, output_dir, mode_tag):
+    umap = _lazy_import_umap()
+    feat_cols = [c for c in df.columns if c.startswith("Feat_")]
+    if not feat_cols:
+        raise ValueError("No Feat_* columns available for UMAP plotting.")
+
+    latent_values = df[feat_cols].to_numpy(dtype=np.float32)
+    reducer = umap.UMAP(n_components=2, random_state=RANDOM_STATE)
+    embedding = reducer.fit_transform(latent_values)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    for dataset_name in pd.unique(df["dataset"]):
+        mask = df["dataset"] == dataset_name
+        axes[0].scatter(
+            embedding[mask, 0],
+            embedding[mask, 1],
+            label=dataset_name,
+            alpha=0.65,
+            s=35,
+        )
+    axes[0].set_title("Latent space by dataset")
+    axes[0].set_xlabel("UMAP 1")
+    axes[0].set_ylabel("UMAP 2")
+    axes[0].legend(loc="best", fontsize=8)
+
+    label_colors = {0: "steelblue", 1: "tomato"}
+    label_names = {0: "HC", 1: "PD"}
+    for lbl, col in label_colors.items():
+        mask = df["y_true"] == lbl
+        axes[1].scatter(
+            embedding[mask, 0],
+            embedding[mask, 1],
+            c=col,
+            label=label_names[lbl],
+            alpha=0.65,
+            s=35,
+        )
+    axes[1].set_title("Latent space by class")
+    axes[1].set_xlabel("UMAP 1")
+    axes[1].set_ylabel("UMAP 2")
+    axes[1].legend(loc="best")
+
+    fig.suptitle(f"UMAP latent space - {mode_tag}", y=1.02)
+    fig.tight_layout()
+
+    out_path = os.path.join(output_dir, f"umap_latent_{mode_tag}.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
 
 
 # ═════════════════════════════════════════════
@@ -237,6 +310,56 @@ def _lat_agg(rows):
         slopes = np.zeros(arr.shape[1], dtype=np.float32)
 
     return np.concatenate([arr.mean(0), arr.std(0), arr.max(0), slopes])
+
+
+def export_latent_trajectories(windows, metadata, subjects_df, enc_stance, enc_walk, output_tag):
+    records = []
+
+    for _, s in subjects_df.iterrows():
+        m = (metadata["dataset"] == s["dataset"]) & (metadata["subjectID"] == s["subjectID"])
+        if m.sum() == 0:
+            continue
+
+        p_win = windows[m].astype("float32")
+        p_meta = metadata[m].reset_index(drop=True)
+        p_win -= p_win.mean(axis=(0, 1), keepdims=True)
+        p_win = p_win / (p_win.std(axis=(0, 1), keepdims=True) + 1e-8)
+
+        sort_idx = p_meta["window_id"].argsort().values if "window_id" in p_meta.columns else np.arange(len(p_meta))
+        p_win = p_win[sort_idx]
+        p_meta = p_meta.iloc[sort_idx].reset_index(drop=True)
+
+        tasks = [
+            ("stance", enc_stance, (p_meta["taskID"] < 2).values),
+            ("walk", enc_walk, ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values),
+        ]
+
+        for task_name, encoder, mask in tasks:
+            if encoder is None or not mask.any():
+                continue
+
+            latents = encoder.get_latent(p_win[mask]).numpy()
+            task_meta = p_meta.loc[mask].reset_index(drop=True)
+
+            for order, (_, row) in enumerate(task_meta.iterrows()):
+                rec = {
+                    "dataset": s["dataset"],
+                    "subjectID": s["subjectID"],
+                    "task": task_name,
+                    "window_order": order,
+                    "window_id": int(row["window_id"]) if "window_id" in row and pd.notna(row["window_id"]) else order,
+                    "taskID": int(row["taskID"]),
+                    "isTurn": int(row["isTurn"]) if "isTurn" in row and pd.notna(row["isTurn"]) else 0,
+                }
+                for d in range(latents.shape[1]):
+                    rec[f"lat_{d}"] = float(latents[order, d])
+                records.append(rec)
+
+    latent_df = pd.DataFrame(records)
+    latent_path = os.path.join(CHECKPOINT_PATH, f"latent_trajectories_{ARCH_MODE}{output_tag}.csv")
+    latent_df.to_csv(latent_path, index=False)
+    print(f"Latent trajectories saved -> {latent_path}")
+    return latent_df, latent_path
 
 def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
                               subjects_df, enc_stance, enc_walk=None):

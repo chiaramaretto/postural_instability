@@ -5,14 +5,14 @@ from pathlib import Path
 from fractions import Fraction
 from scipy.signal import butter, filtfilt, resample_poly
 
-# --- CONFIGURAZIONE ---
+# --- CONFIGURATION ---
 SF_DICT = {"fog_star": 60.0, "omnia_park": 90.0, "pd_phone": 200.0, "wearpd": 100.0, "kiel": 200.0}
 DATASETS = ["fog_star", "omnia_park", "pd_phone", "wearpd", "kiel"]
 SENSOR_COLS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
 TARGET_HZ = 64
 WINDOW_SEC = 5
 
-# Parametri Adaptive Windowing
+# Adaptive Windowing Parameters
 MIN_OVERLAP = 0.7
 MAX_OVERLAP = 0.85
 TARGET_CLASS_RATIO = 0.85  
@@ -21,11 +21,11 @@ RAW_DATA_DIR = Path("posturalInstability/data/cleaned_data")
 OUTPUT_DIR = Path("posturalInstability/cnn_gru/data/")
 
 # =========================================================================
-# 1. FUNZIONI DI PULIZIA E FILTRAGGIO
+# 1. CLEANING AND FILTERING FUNCTIONS
 # =========================================================================
 
 def apply_lowpass(group, sf, cutoff=20.0):
-    #print(f"  Applicazione filtro low-pass a {cutoff} Hz (sf={sf} Hz)")
+    #print(f"  Applying low-pass filter at {cutoff} Hz (sf={sf} Hz)")
     nyq = 0.5 * sf
     b, a = butter(4, cutoff / nyq, btype="low")
     for col in SENSOR_COLS:
@@ -43,7 +43,7 @@ def apply_lowpass(group, sf, cutoff=20.0):
     return group
 
 def soft_trim_outliers(group, sf, z_threshold=5):
-    #   print(f"  Rimozione outlier con Z-score > {z_threshold} (sf={sf} Hz)")
+    #   print(f"  Removing outliers with Z-score > {z_threshold} (sf={sf} Hz)")
     for col in SENSOR_COLS:
         rolling = group[col].rolling(window=int(sf*2), center=True, min_periods=1)
         z_score = np.abs((group[col] - rolling.mean()) / (rolling.std() + 1e-6))
@@ -51,7 +51,7 @@ def soft_trim_outliers(group, sf, z_threshold=5):
     return group
 
 # =========================================================================
-# 2. LOGICA ADAPTIVE WINDOWING
+# 2. ADAPTIVE WINDOWING LOGIC
 # =========================================================================
 
 def merge_stability_label(label):
@@ -62,7 +62,7 @@ def window_step(win_size, overlap):
     return max(1, int(round(win_size * (1 - overlap))))
 
 def count_valid_windows(data, win_size, overlap):
-    """Conta quante finestre valide (senza NaN) produrrebbe un segmento."""
+    """Count how many valid windows (without NaN) a segment would produce."""
     step = window_step(win_size, overlap)
     if len(data) < win_size: return 0
     count = 0
@@ -72,7 +72,7 @@ def count_valid_windows(data, win_size, overlap):
     return count
 
 def class_overlap_from_target(base_count, target_count):
-    """Calcola l'overlap necessario per raggiungere il target di finestre."""
+    """Compute the overlap required to reach the target number of windows."""
     if base_count <= 0: return MIN_OVERLAP
     scale = target_count / base_count
     if scale <= 1: return MIN_OVERLAP
@@ -117,8 +117,8 @@ def create_windows(df):
     win_size = int(TARGET_HZ * WINDOW_SEC)
     group_cols = ["subjectID", "sessionID", "dataset", "taskID", "label"]
 
-    # --- FASE 1: Calcolo Base Counts ---
-    print("Analisi distribuzione per Adaptive Windowing...")
+    # --- PHASE 1: Compute Base Counts ---
+    print("Analyzing distribution for Adaptive Windowing...")
     base_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     for (_, _, _, _, label), group in df.groupby(group_cols):
         base_counts[label] += count_valid_windows(group[SENSOR_COLS].values, win_size, MIN_OVERLAP)
@@ -126,21 +126,21 @@ def create_windows(df):
     majority_count = max(base_counts.values())
     target_count = int(majority_count * TARGET_CLASS_RATIO)
     
-    # Calcolo overlap specifico per classe
+    # Compute class-specific overlap
     overlap_by_class = {
         cls: class_overlap_from_target(base_counts[cls], target_count) 
         for cls in base_counts
     }
 
-    print(f"  Pianificazione overlap: { {k: round(v, 2) for k, v in overlap_by_class.items()} }")
+    print(f"  Overlap plan: { {k: round(v, 2) for k, v in overlap_by_class.items()} }")
 
-    # --- FASE 2: Generazione Atomica ---
+    # --- PHASE 2: Window Generation ---
     window_id = 0
     for (sid, sessid, ds, tid, label), group in df.groupby(group_cols):
         data = group[SENSOR_COLS].values
         turns = group["isTurn"].values
         
-        # Usa l'overlap calcolato per questa classe
+        # Use the overlap computed for this class
         current_overlap = overlap_by_class[label]
         step = window_step(win_size, current_overlap)
         
@@ -164,7 +164,7 @@ def create_windows(df):
     return np.array(windows, dtype=np.float32), np.array(labels, dtype=np.float32), pd.DataFrame(metadata_rows)
 
 # =========================================================================
-# 3. PIPELINE PRINCIPALE
+# 3. MAIN PIPELINE
 # =========================================================================
 
 def main():
@@ -201,7 +201,7 @@ def main():
 
     full_df = pd.concat(all_processed_data, ignore_index=True)
     
-    # Generazione file allineati con Adaptive Windowing
+    # Generate aligned files with Adaptive Windowing
     x, y, meta = create_windows(full_df)
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -210,9 +210,9 @@ def main():
     meta.to_csv(OUTPUT_DIR / "metadata.csv", index=False)
     
     print("\n" + "="*50)
-    print(f"PREPROCESSING COMPLETATO (Adaptive Windowing [0.5 - 0.8])")
-    print(f"Finestre generate: {len(x)}")
-    print(f"Distribuzione classi:\n{meta['label'].value_counts().sort_index()}")
+    print(f"PREPROCESSING COMPLETED (Adaptive Windowing [0.5 - 0.8])")
+    print(f"Windows generated: {len(x)}")
+    print(f"Class distribution:\n{meta['label'].value_counts().sort_index()}")
     print("="*50)
 
 if __name__ == "__main__":
