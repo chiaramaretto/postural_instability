@@ -22,7 +22,6 @@ RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8
-ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
 
 def _lazy_import_umap():
     try:
@@ -103,7 +102,7 @@ def load_data():
     labels_raw   = np.load(os.path.join(DATA_PATH, "labels.npy")).astype(np.float32)
     metadata     = pd.read_csv(os.path.join(DATA_PATH, "metadata.csv"))
 
-    labels_4cls  = np.clip(labels_raw, 0, 3).astype(np.int32)
+    labels_4cls   = np.clip(labels_raw, 0, 3).astype(np.int32)
     binary_labels = (labels_4cls >= 1).astype(np.float32)
 
     print(f"Windows        : {windows.shape}")
@@ -299,7 +298,7 @@ def _lat_agg(rows):
     return np.concatenate([arr.mean(0), arr.std(0), arr.max(0), slopes])
 
 
-def export_latent_trajectories(windows, metadata, subjects_df, enc_stance, enc_walk, output_tag):
+def export_latent_trajectories(windows, metadata, subjects_df, enc_stance, enc_walk, arch_mode, output_tag):
     records = []
 
     for _, s in subjects_df.iterrows():
@@ -343,7 +342,7 @@ def export_latent_trajectories(windows, metadata, subjects_df, enc_stance, enc_w
                 records.append(rec)
 
     latent_df = pd.DataFrame(records)
-    latent_path = os.path.join(CHECKPOINT_PATH, f"latent_trajectories_{ARCH_MODE}{output_tag}.csv")
+    latent_path = os.path.join(CHECKPOINT_PATH, f"latent_trajectories_{arch_mode}{output_tag}.csv")
     latent_df.to_csv(latent_path, index=False)
     print(f"Latent trajectories saved -> {latent_path}")
     return latent_df, latent_path
@@ -443,7 +442,7 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
 # ═════════════════════════════════════════════
 
 
-def main(arch_mode=None):
+def main(arch_mode="autoencoder"):
     os.makedirs(CHECKPOINT_PATH, exist_ok=True)
     os.makedirs(RESULTS_PATH, exist_ok=True)
 
@@ -454,23 +453,19 @@ def main(arch_mode=None):
     s_train, s_val, s_test = patient_split(metadata, binary_labels)
     s_train, s_val = ensure_validation_domain_coverage(s_train, s_val)
 
-    enc_stance = get_or_train_encoder(
-        task_name="stance", windows=windows, labels_4cls=labels_4cls, metadata=metadata, 
-        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] < 2),
-        input_shape=input_shape, arch_mode=ARCH_MODE
-    )
-    
-    enc_walk = get_or_train_encoder(
-        task_name="walk", windows=windows, labels_4cls=labels_4cls, metadata=metadata,
-        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] == 2),
-        input_shape=input_shape, arch_mode=ARCH_MODE
+    # Addestramento di UN SOLO encoder per tutte le finestre (stance e walk insieme)
+    enc_shared = get_or_train_encoder(
+        task_name="shared", windows=windows, labels_4cls=labels_4cls, metadata=metadata, 
+        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] <= 2),
+        input_shape=input_shape, arch_mode=arch_mode
     )
 
     print("\nExtracting patient-level features...")
     s_fit = pd.concat([s_train, s_val]).reset_index(drop=True)
 
-    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_stance, enc_walk)
-    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_stance, enc_walk)
+    # Passiamo enc_shared due volte (per estrarre coerentemente feature di stance e walk usando lo stesso encoder)
+    X_fit,  y_fit, y_fit_4cls, dsets_fit,  sids_fit  = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit,  enc_shared, enc_shared)
+    X_test, y_test, y_test_4cls, dsets_test, sids_test = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_shared, enc_shared)
 
     print(f"Full stance+walking feature vector : {X_fit.shape[1]} dims")
     print(f"Train patients      : {len(y_fit)}")
@@ -537,8 +532,8 @@ def main(arch_mode=None):
     train_df = train_df_imputed
     test_df = test_df_imputed
 
-    train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{ARCH_MODE}.csv")
-    test_out = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{ARCH_MODE}.csv")
+    train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{arch_mode}.csv")
+    test_out = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{arch_mode}.csv")
    
     train_df.to_csv(train_out, index=False)
     test_df.to_csv(test_out, index=False)
@@ -546,7 +541,7 @@ def main(arch_mode=None):
     # Make UMAP plots for train and test feature CSVs
     try:
         full_df = pd.concat([train_df, test_df], ignore_index=True)
-        umap_tag_full = f"{ARCH_MODE}"
+        umap_tag_full = f"{arch_mode}"
         umap_path_full = make_umap_plot(full_df, RESULTS_PATH, umap_tag_full)
         print(f"UMAP saved -> {umap_path_full}")
     except Exception as e:
@@ -560,8 +555,6 @@ def main(arch_mode=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Feature extraction and optional sweep runner")
-    parser.add_argument("--arch-mode", choices=["autoencoder", "classifier"], help="Architecture mode to run")
+    parser.add_argument("--arch-mode", choices=["autoencoder", "classifier"], default="autoencoder", help="Architecture mode to run")
     args = parser.parse_args()
     main(arch_mode=args.arch_mode)
-
-    
