@@ -209,10 +209,10 @@ def run_ablation(arch_mode):
         print("═" * 60)
         print(summary_df.to_string(index=False))
 
-        summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_{arch_mode}.csv")
-        dataset_summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_by_dataset_{arch_mode}.csv")
-        preds_path = os.path.join(RESULTS_PATH, f"double_ablation_predictions_{arch_mode}.xlsx")
-        
+        summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_{arch_mode}_{s}.csv")
+        dataset_summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_by_dataset_{arch_mode}_{s}.csv")
+        preds_path = os.path.join(RESULTS_PATH, f"double_ablation_predictions_{arch_mode}_{s}.xlsx")
+
         summary_df.to_csv(summary_path, index=False)
         dataset_df.to_csv(dataset_summary_path, index=False)
         pred_df.to_excel(preds_path, index=False)
