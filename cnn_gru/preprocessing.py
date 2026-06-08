@@ -13,7 +13,7 @@ TARGET_HZ = 64
 WINDOW_SEC = 5
 
 # Adaptive Windowing Parameters
-MIN_OVERLAP = 0.7
+MIN_OVERLAP = 0.5
 MAX_OVERLAP = 0.85
 TARGET_CLASS_RATIO = 0.85  
 
@@ -112,7 +112,11 @@ def resample_group(group, original_sf):
         resampled["isTurn"] = np.zeros(n_target)
     return pd.DataFrame(resampled)
 
-def create_windows(df):
+def create_windows(df, min_windows=1):
+    """
+    Crea finestre dai dati, applica overlap adattivo per bilanciare le classi
+    e filtra i soggetti che non hanno dati sufficienti per entrambi i task.
+    """
     windows, labels, metadata_rows = [], [], []
     win_size = int(TARGET_HZ * WINDOW_SEC)
     group_cols = ["subjectID", "sessionID", "dataset", "taskID", "label"]
@@ -122,7 +126,8 @@ def create_windows(df):
     base_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     for (_, _, _, _, label), group in df.groupby(group_cols):
         base_counts[label] += count_valid_windows(group[SENSOR_COLS].values, win_size, MIN_OVERLAP)
-
+    
+    print(f"  Base window counts by class: {base_counts}")
     majority_count = max(base_counts.values())
     target_count = int(majority_count * TARGET_CLASS_RATIO)
     
@@ -131,7 +136,6 @@ def create_windows(df):
         cls: class_overlap_from_target(base_counts[cls], target_count) 
         for cls in base_counts
     }
-
     print(f"  Overlap plan: { {k: round(v, 2) for k, v in overlap_by_class.items()} }")
 
     # --- PHASE 2: Window Generation ---
@@ -140,7 +144,6 @@ def create_windows(df):
         data = group[SENSOR_COLS].values
         turns = group["isTurn"].values
         
-        # Use the overlap computed for this class
         current_overlap = overlap_by_class[label]
         step = window_step(win_size, current_overlap)
         
@@ -161,13 +164,34 @@ def create_windows(df):
             })
             window_id += 1
 
-    return np.array(windows, dtype=np.float32), np.array(labels, dtype=np.float32), pd.DataFrame(metadata_rows)
+    x, y, meta = np.array(windows, dtype=np.float32), np.array(labels, dtype=np.float32), pd.DataFrame(metadata_rows)
 
+    # --- PHASE 3: Quality Filter for Subjects ---
+    # Garantisce che ogni soggetto abbia almeno min_windows per task (Stance OR Walk)
+    meta['ds_sid'] = list(zip(meta['dataset'], meta['subjectID']))
+    
+    # Conta quante finestre ha ogni soggetto per ogni task
+    counts = meta.groupby(['ds_sid', 'taskID']).size().unstack(fill_value=0)
+    
+    # Condizione: Walk (2) >= min E Stance (0 o 1) >= min
+    # Usiamo .get() per gestire il caso in cui un task manchi totalmente incounts
+    valid_mask = (counts.get(2, 0) >= min_windows) & \
+                 ((counts.get(0, 0) >= min_windows) | (counts.get(1, 0) >= min_windows))
+    
+    valid_ds_sids = counts[valid_mask].index
+    
+    # Applica il filtro finale
+    final_indices = meta[meta['ds_sid'].isin(valid_ds_sids)].index
+    
+    print(f"Scartate {len(x) - len(final_indices)} finestre appartenenti a soggetti incompleti o con dati insufficienti.")
+    
+    return x[final_indices], y[final_indices], meta.loc[final_indices].drop(columns=['ds_sid'])
 # =========================================================================
 # 3. MAIN PIPELINE
 # =========================================================================
 
 def main():
+    # keep only subjects that have both tasks 2 and 0 or 1
     all_processed_data = []
     clinical_map = {}
 
@@ -177,15 +201,41 @@ def main():
             cdf = pd.read_csv(cp)
             for _, r in cdf.iterrows():
                 clinical_map[(ds_name, str(r["subjectID"]).strip())] = r["postural_stability"]
+    
+    valid_subjects = set()
+    for ds_name in DATASETS:
+        sensor_path = RAW_DATA_DIR / f"{ds_name}_sensor.csv"
+        if not sensor_path.exists(): continue
+        
+        df = pd.read_csv(sensor_path)
+        df["subjectID"] = df["subjectID"].astype(str).str.strip()
+        
+        # Raggruppa per soggetto e trova i task unici svolti
+        subject_tasks = df.groupby("subjectID")["taskID"].unique()
+        
+        for sid, tasks in subject_tasks.items():
+            # Condizione: deve avere il 2 (Walk) E (0 oppure 1) (Stance)
+            has_walk = 2 in tasks
+            has_stance = 0 in tasks or 1 in tasks
+            
+            if has_walk and has_stance:
+                # Verifica anche che il soggetto abbia un'etichetta clinica
+                if (ds_name, sid) in clinical_map:
+                    valid_subjects.add((ds_name, sid))
+
+    print(f" {len(valid_subjects)} valid subjects found.")
 
     for ds_name in DATASETS:
         sensor_path = RAW_DATA_DIR / f"{ds_name}_sensor.csv"
         if not sensor_path.exists(): continue
         
         df = pd.read_csv(sensor_path)
+
         df["dataset"] = ds_name
         df["subjectID"] = df["subjectID"].astype(str).str.strip()
-
+    
+        # keep only subjects that have both tasks 2 and 0 or 1
+        df = df[df["subjectID"].isin([sid for ds, sid in valid_subjects if ds == ds_name])]
         for (sid, tid), group in df.groupby(["subjectID", "taskID"]):
             if tid not in [0, 1, 2]: continue
             label = clinical_map.get((ds_name, sid), np.nan)
@@ -199,8 +249,23 @@ def main():
             resampled["label"] = merge_stability_label(label)
             all_processed_data.append(resampled)
 
-    full_df = pd.concat(all_processed_data, ignore_index=True)
+    full_df = pd.concat(all_processed_data, ignore_index=True)    
+
+    final_subject_tasks = full_df.groupby(["dataset", "subjectID"])["taskID"].unique()
     
+    valid_final_subjects = []
+    for (ds, sid), tasks in final_subject_tasks.items():
+        has_walk = 2 in tasks
+        has_stance = 0 in tasks or 1 in tasks
+        if has_walk and has_stance:
+            valid_final_subjects.append((ds, sid))
+    
+    full_df["ds_sid"] = list(zip(full_df["dataset"], full_df["subjectID"]))
+    full_df = full_df[full_df["ds_sid"].isin(valid_final_subjects)]
+    full_df = full_df.drop(columns=["ds_sid"])
+    
+    print(f"\n Subjects maintained after final filtering: {len(valid_final_subjects)}")
+  
     # Generate aligned files with Adaptive Windowing
     x, y, meta = create_windows(full_df)
     

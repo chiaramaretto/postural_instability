@@ -15,13 +15,13 @@ class CnnGru(tf.keras.Model):
         self.latent_dim = latent_dim
 
         # Spatial feature extraction
-        self.conv1 = Conv1D(32, kernel_size=7, strides=2, activation="relu", padding="same")
+        self.conv1 = Conv1D(16, kernel_size=5, strides=1, activation="relu", padding="same")
         self.bn1   = BatchNormalization()
-        self.conv2 = Conv1D(64, kernel_size=5, strides=2, activation="relu", padding="same")
+        self.conv2 = Conv1D(32, kernel_size=3, strides=1, activation="relu", padding="same")
         self.bn2   = BatchNormalization()
 
         # Temporal modelling
-        self.gru     = GRU(64, return_sequences=False)
+        self.gru     = GRU(32, return_sequences=False)
         self.dropout = Dropout(0.4)
 
         # Latent representation
@@ -67,24 +67,24 @@ class ImuEncoder(tf.keras.Model):
         self.compressed  = self.seq_len // 4       # 160 (two strides of 2)
 
         # ── Encoder ────────────────────────────────────────────────────
-        self.conv1 = Conv1D(32, kernel_size=7, strides=2, activation="relu", padding="same")
+        self.conv1 = Conv1D(16, kernel_size=5, strides=1, activation="relu", padding="same")
         self.bn1   = BatchNormalization()
-        self.conv2 = Conv1D(64, kernel_size=5, strides=2, activation="relu", padding="same")
+        self.conv2 = Conv1D(32, kernel_size=3, strides=1, activation="relu", padding="same")
         self.bn2   = BatchNormalization()
 
         # GRU processes compressed sequence (seq_len/4 timesteps)
-        self.gru        = GRU(64, return_sequences=True)   # keep sequence for decoder
+        self.gru        = GRU(32, return_sequences=True)   # keep sequence for decoder
         self.global_avg = GlobalAveragePooling1D()          # for latent extraction
         self.dropout    = Dropout(0.3)
 
         self.latent_feat = Dense(latent_dim, activation="linear", name="latent_space")
 
         # ── Decoder ────────────────────────────────────────────────────
-        self.dec_dense  = Dense(self.compressed * 64, activation="relu")
-        self.dec_reshape = Reshape((self.compressed, 64))
-        self.deconv1    = Conv1DTranspose(64, kernel_size=3, strides=2,
+        self.dec_dense  = Dense(self.compressed * 32, activation="relu")
+        self.dec_reshape = Reshape((self.compressed, 32))
+        self.deconv1    = Conv1DTranspose(32, kernel_size=3, strides=2,
                                           activation="relu", padding="same")
-        self.deconv2    = Conv1DTranspose(32, kernel_size=3, strides=2,
+        self.deconv2    = Conv1DTranspose(16, kernel_size=3, strides=2,
                                           activation="relu", padding="same")
         self.out_layer  = Conv1D(self.n_channels, kernel_size=3,
                                  activation="linear", padding="same",

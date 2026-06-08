@@ -10,8 +10,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from train import train, train_autoencoder
-from train import train_autoencoder_mmd
+from train import train_autoencoder, train_classifier
 
 from scipy.signal import butter, filtfilt, find_peaks
 from sklearn.model_selection import train_test_split
@@ -24,11 +23,6 @@ RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8
 ARCH_MODE       = "autoencoder"  # "autoencoder" or "classifier"
-USE_MMD         = False
-TARGET_DATASET  = None
-LAMBDA_MMD      = 0.01
-LAMBDA_VALUES   = [0.001, 0.005, 0.01]
-
 
 def _lazy_import_umap():
     try:
@@ -42,19 +36,6 @@ def _lazy_import_umap():
             raise ImportError(
                 "UMAP is not installed. Install `umap-learn` in the active environment to run this analysis."
             ) from first_error
-
-
-def _format_lambda_tag(lambda_mmd):
-    return f"lambda_{lambda_mmd:.3f}".replace(".", "p")
-
-
-def build_mmd_suffix(lambda_mmd=None):
-    lambda_value = LAMBDA_MMD if lambda_mmd is None else lambda_mmd
-    suffix_parts = ["_mmd"]
-    if TARGET_DATASET:
-        suffix_parts.append(str(TARGET_DATASET))
-    suffix_parts.append(_format_lambda_tag(lambda_value))
-    return "_".join(suffix_parts)
 
 
 def make_umap_plot(df, output_dir, mode_tag):
@@ -386,9 +367,8 @@ def extract_patient_features(windows, binary_labels, labels_4cls, metadata,
         p_win = p_win / (p_win.std(axis=(0, 1), keepdims=True) + 1e-8)
 
         is_stance  = ((p_meta["taskID"] == 0) | (p_meta["taskID"] == 1)).values
-        is_walking = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 0)).values
-        is_turning = ((p_meta["taskID"] == 2) & (p_meta["isTurn"] == 1)).values
-
+        is_walking = ((p_meta["taskID"] == 2)).values
+                      
         has_s = is_stance.any()
         has_w = is_walking.any()
 
@@ -430,13 +410,6 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
     weights_filename = f"best_{arch_mode}_{task_name}.weights.h5"
     full_path = os.path.join(CHECKPOINT_PATH, weights_filename)
 
-    # If MMD is enabled, prefer a separate weights filename with _mmd suffix
-    if USE_MMD:
-        suffix = build_mmd_suffix()
-        weights_mmd = weights_filename.replace('.weights.h5', f'{suffix}.weights.h5')
-        weights_filename_mmd = weights_mmd
-        full_path = os.path.join(CHECKPOINT_PATH, weights_filename_mmd)
-
     if arch_mode == "autoencoder":
         model = ImuEncoder(input_shape=input_shape, latent_dim=LATENT_DIM)
         model(tf.zeros((1,) + input_shape)) 
@@ -444,21 +417,8 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
             print(f"Loading {arch_mode} weights for {task_name}...")
             model.load_weights(full_path)
         else:
-            print(f"Training {arch_mode} for {task_name}...")
-            if USE_MMD:
-                train_groups, _, _ = split_windows_by_dataset(windows, labels_4cls, metadata, train_mask)
-                val_groups, _, _ = split_windows_by_dataset(windows, labels_4cls, metadata, val_mask)
-
-                if len(train_groups) < 2:
-                    raise ValueError(f"Need at least two dataset groups for MMD training in {task_name} encoder.")
-
-                train_autoencoder_mmd(
-                    model, train_groups, None, val_groups if len(val_groups) > 0 else None, None,
-                    CHECKPOINT_PATH, weights_filename=weights_filename_mmd,
-                    lambda_mmd=LAMBDA_MMD
-                )
-            else:
-                train_autoencoder(model, x_train, x_val, CHECKPOINT_PATH, weights_filename)
+            print(f"Training {arch_mode} for {task_name}...")            
+            train_autoencoder(model, x_train, x_val, CHECKPOINT_PATH, weights_filename)
 
     elif arch_mode == "classifier":
         y_train = labels_4cls[train_mask]
@@ -473,23 +433,7 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
             model.load_weights(full_path)
         else:
             print(f"Training {arch_mode} for {task_name}...")
-            if USE_MMD:
-                train_groups, label_groups, _ = split_windows_by_dataset(windows, labels_4cls, metadata, train_mask)
-                val_groups, val_label_groups, _ = split_windows_by_dataset(windows, labels_4cls, metadata, val_mask)
-
-                if len(train_groups) < 2:
-                    raise ValueError(f"Need at least two dataset groups for MMD training in {task_name} encoder.")
-
-                from train import train_classifier_mmd
-                train_classifier_mmd(
-                    model, train_groups, label_groups, None,
-                    x_val_source=val_groups if len(val_groups) > 0 else None,
-                    y_val_source=val_label_groups if len(val_label_groups) > 0 else None,
-                    checkpoint_path=CHECKPOINT_PATH, weights_filename=weights_filename_mmd,
-                    lambda_mmd=LAMBDA_MMD
-                )
-            else:
-                train(model, x_train, y_train, x_val, y_val, CHECKPOINT_PATH, weights_filename)
+            train_classifier(model, x_train, y_train, x_val, y_val, CHECKPOINT_PATH, weights_filename)
     
     return model
 
@@ -499,18 +443,9 @@ def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_v
 # ═════════════════════════════════════════════
 
 
-def main(arch_mode=None, use_mmd=None, lambda_mmd=None):
+def main(arch_mode=None):
     os.makedirs(CHECKPOINT_PATH, exist_ok=True)
     os.makedirs(RESULTS_PATH, exist_ok=True)
-
-    global ARCH_MODE, USE_MMD, LAMBDA_MMD
-    # override globals if parameters provided
-    if arch_mode is not None:
-        ARCH_MODE = arch_mode
-    if use_mmd is not None:
-        USE_MMD = use_mmd
-    if lambda_mmd is not None:
-        LAMBDA_MMD = lambda_mmd
 
     print("Loading datasets...")
     windows, labels_4cls, binary_labels, metadata = load_data()
@@ -576,6 +511,9 @@ def main(arch_mode=None, use_mmd=None, lambda_mmd=None):
     # Impute training set (fill NaNs using its group's means)
     train_df_imputed = train_df.copy()
     n_before = train_df_imputed[feat_cols].isna().sum().sum()
+    #printa i soggetti con NaN prima dell'imputazione
+    nan_subjects = train_df_imputed[train_df_imputed[feat_cols].isna().any(axis=1)][["dataset", "subjectID", "y_true"]]
+    print(f"Subjects with NaN features before imputation:\n{nan_subjects}")
     for label, mean_vals in train_group_means.items():
         mask = train_df_imputed["y_true"] == label
         train_df_imputed.loc[mask, feat_cols] = train_df_imputed.loc[mask, feat_cols].fillna(mean_vals)
@@ -601,34 +539,14 @@ def main(arch_mode=None, use_mmd=None, lambda_mmd=None):
 
     train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{ARCH_MODE}.csv")
     test_out = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{ARCH_MODE}.csv")
-    if USE_MMD:
-        suffix = build_mmd_suffix()
-        train_out = train_out.replace('.csv', f'{suffix}.csv')
-        test_out = test_out.replace('.csv', f'{suffix}.csv')
-    
+   
     train_df.to_csv(train_out, index=False)
     test_df.to_csv(test_out, index=False)
     
-    # Export latent trajectories per-subject (fit and test) and save UMAPs per run
-    mmd_tag = build_mmd_suffix() if USE_MMD else ""
-    # latent export: fit subjects
-    try:
-        latent_df_fit, latent_fit_path = export_latent_trajectories(windows, metadata, s_fit, enc_stance, enc_walk, output_tag=mmd_tag + "_fit")
-    except Exception as e:
-        print(f"Warning: failed to export latent trajectories (fit): {e}")
-        latent_fit_path = None
-
-    # latent export: test subjects
-    try:
-        latent_df_test, latent_test_path = export_latent_trajectories(windows, metadata, s_test, enc_stance, enc_walk, output_tag=mmd_tag + "_test")
-    except Exception as e:
-        print(f"Warning: failed to export latent trajectories (test): {e}")
-        latent_test_path = None
-
     # Make UMAP plots for train and test feature CSVs
     try:
         full_df = pd.concat([train_df, test_df], ignore_index=True)
-        umap_tag_full = f"{ARCH_MODE}{mmd_tag}"
+        umap_tag_full = f"{ARCH_MODE}"
         umap_path_full = make_umap_plot(full_df, RESULTS_PATH, umap_tag_full)
         print(f"UMAP saved -> {umap_path_full}")
     except Exception as e:
@@ -640,30 +558,10 @@ def main(arch_mode=None, use_mmd=None, lambda_mmd=None):
     print("Ready to run classifier.py for the double ablation study.")
 
 
-def run_automated_sweep(arch_mode=None):
-    """Run baseline (no MMD) then each value in LAMBDA_VALUES with MMD.
-    Saves features, latent CSVs and UMAP PNGs for each run.
-    """
-    print('\n=== Automated sweep: baseline (no MMD) ===')
-    main(arch_mode=arch_mode, use_mmd=False, lambda_mmd=None)
-
-    for v in LAMBDA_VALUES:
-        print(f'\n=== Automated sweep: MMD lambda={v} ===')
-        main(arch_mode=arch_mode, use_mmd=True, lambda_mmd=v)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Feature extraction and optional sweep runner")
     parser.add_argument("--arch-mode", choices=["autoencoder", "classifier"], help="Architecture mode to run")
-    parser.add_argument("--lambda-mmd", type=float, help="Single lambda_mmd value to run with MMD enabled")
-    parser.add_argument("--use-mmd", action="store_true", help="Enable MMD for a single run")
-    parser.add_argument("--auto-sweep", action="store_true", help="Run baseline + sweep over LAMBDA_VALUES automatically")
     args = parser.parse_args()
+    main(arch_mode=args.arch_mode)
 
-    # If no CLI parameters are provided, run the automated sweep by default.
-    if len(sys.argv) == 1 or args.auto_sweep:
-        run_automated_sweep(arch_mode=args.arch_mode)
-    else:
-        lam = args.lambda_mmd if args.lambda_mmd is not None else None
-        use_mmd_flag = bool(args.use_mmd)
-        main(arch_mode=args.arch_mode, use_mmd=use_mmd_flag, lambda_mmd=lam)
+    
