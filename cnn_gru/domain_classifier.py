@@ -1,312 +1,398 @@
+"""
+domain_classifier.py
+====================
+Evaluates domain separability of the extracted features.
+For each arch_mode, compares three variants:
+  - baseline  (no domain adaptation)
+  - coral     (CORAL alignment toward wearpd)
+  - mmd       (MMD mean-shift toward wearpd)
+
+Outputs:
+  - domain_classifier_results.csv    full per-model results
+  - domain_classifier_comparison.csv baseline vs coral vs mmd delta table
+  - domain_classifier_heatmap.png    accuracy heatmap
+  - domain_classifier_delta.png      delta bar chart
+"""
+
 import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import argparse
 import sys
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score, balanced_accuracy_score,
+    f1_score, roc_auc_score,
+)
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.svm import SVC
 
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
-FEATURE_PREFIX = "train_features_enriched_"
-ARCH_MODE = "classifier"  # "autoencoder", "classifier", "classifier_mmd"
-def discover_feature_modes(checkpoint_path=CHECKPOINT_PATH):
-    modes = []
-    for fname in os.listdir(checkpoint_path):
-        if not fname.startswith(FEATURE_PREFIX) or not fname.endswith('.csv'):
-            continue
-        mode = fname[len(FEATURE_PREFIX):-4]
-        # require both train and test files to exist for this mode
-        train_path = os.path.join(checkpoint_path, f"train_features_enriched_{mode}.csv")
-        test_path = os.path.join(checkpoint_path, f"test_features_enriched_{mode}.csv")
-        if os.path.exists(train_path) and os.path.exists(test_path):
-            modes.append(mode)
-    # sort deterministically, prefer known order if present
-    preferred = ["autoencoder", "classifier", "classifier_mmd"]
-    modes_sorted = [m for m in preferred if m in modes] + sorted([m for m in modes if m not in preferred])
-    return modes_sorted
+LATENT_DIM      = 8
+LATENT_BLOCK    = 4 * LATENT_DIM   # 32 dims
+
+# DA variants to compare
+DA_VARIANTS = ["baseline", "coral", "mmd"]
 
 
-def get_models():
+# ══════════════════════════════════════════════════════════════════════════════
+# Discovery
+# ══════════════════════════════════════════════════════════════════════════════
+
+def discover_arch_modes(checkpoint_path=CHECKPOINT_PATH):
+    """
+    Find all arch_modes for which baseline, coral and mmd variants exist.
+    Returns list of base arch_mode strings (e.g. ['autoencoder', 'classifier']).
+    """
+    arch_modes = set()
+    for da in DA_VARIANTS:
+        for fname in os.listdir(checkpoint_path):
+            prefix = f"train_features_enriched_"
+            suffix = f"_{da}.csv"
+            if fname.startswith(prefix) and fname.endswith(suffix):
+                arch = fname[len(prefix):-len(suffix)]
+                # check all three variants exist
+                all_exist = all(
+                    os.path.exists(os.path.join(
+                        checkpoint_path,
+                        f"train_features_enriched_{arch}_{v}.csv")) and
+                    os.path.exists(os.path.join(
+                        checkpoint_path,
+                        f"test_features_enriched_{arch}_{v}.csv"))
+                    for v in DA_VARIANTS
+                )
+                if all_exist:
+                    arch_modes.add(arch)
+    return sorted(arch_modes)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature loading & splitting
+# ══════════════════════════════════════════════════════════════════════════════
+
+def load_variant(arch_mode, da_variant, checkpoint_path=CHECKPOINT_PATH):
+    tag = f"{arch_mode}_{da_variant}"
+    tr  = os.path.join(checkpoint_path, f"train_features_enriched_{tag}.csv")
+    te  = os.path.join(checkpoint_path, f"test_features_enriched_{tag}.csv")
+    if not os.path.exists(tr) or not os.path.exists(te):
+        raise FileNotFoundError(f"Missing: {tr} or {te}")
+    return pd.read_csv(tr), pd.read_csv(te)
+
+
+def get_feature_blocks(df):
+    """Return dict of feature blocks: Latent, Handcrafted, Combined."""
+    feat_cols = [c for c in df.columns if c.startswith("Feat_")]
+    # filter NaN rows
+    valid     = df[feat_cols].notna().all(axis=1)
+    df_v      = df[valid]
+    X         = df_v[feat_cols].values
+    X_lat     = X[:, :LATENT_BLOCK]
+    X_hc      = X[:, LATENT_BLOCK:]
+    return {
+        "Latent":      (X_lat, df_v),
+        "Handcrafted": (X_hc,  df_v),
+        "Combined":    (X,     df_v),
+    }, valid
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Models
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_domain_models():
     return {
         "RandomForest": RandomForestClassifier(
-            n_estimators=200,
-            max_depth=8,
-            min_samples_leaf=2,
-            class_weight="balanced",
-            random_state=42,
-            n_jobs=-1,
+            n_estimators=200, max_depth=8, min_samples_leaf=2,
+            class_weight="balanced", random_state=42, n_jobs=-1,
         ),
-        "GradientBoosting": __import__("sklearn.ensemble", fromlist=["GradientBoostingClassifier"]).GradientBoostingClassifier(
-            n_estimators=120,
-            max_depth=4,
-            random_state=42,
+        "GradientBoosting": GradientBoostingClassifier(
+            n_estimators=120, max_depth=4, random_state=42,
         ),
         "SVM": SVC(
-            kernel="rbf",
-            class_weight="balanced",
-            probability=True,
-            random_state=42,
+            kernel="rbf", class_weight="balanced",
+            probability=True, random_state=42,
         ),
         "LogisticRegression": LogisticRegression(
-            class_weight="balanced",
-            max_iter=3000,
-            random_state=42,
+            class_weight="balanced", max_iter=3000, random_state=42,
         ),
     }
 
 
-def load_feature_split(mode):
-    train_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{mode}.csv")
-    test_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{mode}.csv")
-    if not os.path.exists(train_path) or not os.path.exists(test_path):
-        raise FileNotFoundError(f"Missing enriched feature files for mode '{mode}'.")
-    return pd.read_csv(train_path), pd.read_csv(test_path)
+# ══════════════════════════════════════════════════════════════════════════════
+# Evaluation
+# ══════════════════════════════════════════════════════════════════════════════
 
+def evaluate_domain(X_train, y_train, X_test, y_test,
+                    class_names, model_name, model):
+    """Train domain classifier, return metric dict."""
+    clf = make_pipeline(
+        VarianceThreshold(threshold=1e-6),
+        StandardScaler(),
+        model,
+    )
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    y_prob = clf.predict_proba(X_test)
 
-def get_feature_matrix(df):
-    feat_cols = [c for c in df.columns if c.startswith("Feat_")]
-    if not feat_cols:
-        raise ValueError("No feature columns found. Expected columns starting with 'Feat_'.")
-    return df[feat_cols].values
-
-
-def clean_features(x_train, x_test):
-    selector = VarianceThreshold(threshold=1e-6)
-    x_train_f = selector.fit_transform(x_train)
-    x_test_f = selector.transform(x_test)
-    return x_train_f, x_test_f
-
-
-def train_domain_model(model, x_train, y_train):
-    return make_pipeline(StandardScaler(), model).fit(x_train, y_train)
-
-
-def evaluate_combo(mode, model_name, model):
-    train_df, test_df = load_feature_split(mode)
-
-    x_train = get_feature_matrix(train_df)
-    x_test = get_feature_matrix(test_df)
-    y_train_raw = train_df["dataset"].values
-    y_test_raw = test_df["dataset"].values
-
-    encoder = LabelEncoder()
-    encoder.fit(np.concatenate([y_train_raw, y_test_raw]))
-    y_train = encoder.transform(y_train_raw)
-    y_test = encoder.transform(y_test_raw)
-
-    x_train_f, x_test_f = clean_features(x_train, x_test)
-    clf = train_domain_model(model, x_train_f, y_train)
-
-    y_pred = clf.predict(x_test_f)
-    acc = accuracy_score(y_test, y_pred)
-    bal_acc = balanced_accuracy_score(y_test, y_pred)
-    macro_f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
-    chance = 1.0 / len(encoder.classes_)
-    cm = confusion_matrix(y_test, y_pred, labels=np.arange(len(encoder.classes_)))
-    cm_norm = cm.astype(float) / np.maximum(cm.sum(axis=1, keepdims=True), 1)
+    n_cls  = len(np.unique(y_train))
+    chance = 1.0 / n_cls
+    auc    = (roc_auc_score(y_test, y_prob[:, 1])
+              if n_cls == 2
+              else roc_auc_score(y_test, y_prob,
+                                 average="macro", multi_class="ovr"))
 
     return {
-        "Feature Set": mode,
-        "Model": model_name,
-        "Train Samples": len(train_df),
-        "Test Samples": len(test_df),
-        "Raw Features": x_train.shape[1],
-        "Kept Features": x_train_f.shape[1],
-        "Domains": len(encoder.classes_),
-        "Chance": chance,
-        "Accuracy": acc,
-        "Balanced Acc": bal_acc,
-        "Macro F1": macro_f1,
-        "Gap vs Chance": acc - chance,
-        "Classes": encoder.classes_,
-        "Confusion Matrix": cm,
-        "Confusion Matrix Norm": cm_norm,
+        "Model":        model_name,
+        "Accuracy":     round(accuracy_score(y_test, y_pred),    4),
+        "Balanced Acc": round(balanced_accuracy_score(y_test, y_pred), 4),
+        "Macro F1":     round(f1_score(y_test, y_pred, average="macro",
+                                        zero_division=0), 4),
+        "AUC":          round(auc, 4),
+        "Chance":       round(chance, 4),
+        "Gap":          round(accuracy_score(y_test, y_pred) - chance, 4),
     }
 
-def main(arch_mode=None):
-    os.makedirs(RESULTS_PATH, exist_ok=True)
 
-    print("Caricamento delle feature e benchmark dei modelli...\n")
+def run_arch(arch_mode):
+    models  = get_domain_models()
+    records = []
 
-    models = get_models()
-    results = []
+    for da_variant in DA_VARIANTS:
+        print(f"\n  DA variant: {da_variant.upper()}")
+        try:
+            tr_df, te_df = load_variant(arch_mode, da_variant)
+        except FileNotFoundError as e:
+            print(f"    [!] {e}")
+            continue
 
-    feature_modes = discover_feature_modes(CHECKPOINT_PATH)
-    if not feature_modes:
-        print("No enriched feature CSV pairs found in models folder. Exiting.")
+        # Encode domain labels
+        enc = LabelEncoder()
+        enc.fit(np.concatenate([tr_df["dataset"].values,
+                                te_df["dataset"].values]))
+        class_names = enc.classes_
+        n_domains   = len(class_names)
+        print(f"    Domains ({n_domains}): {list(class_names)}")
+
+        feat_blocks_tr, valid_tr = get_feature_blocks(tr_df)
+        feat_blocks_te, valid_te = get_feature_blocks(te_df)
+
+        for feat_name in ["Latent", "Handcrafted", "Combined"]:
+            X_tr_raw, df_tr_v = feat_blocks_tr[feat_name]
+            X_te_raw, df_te_v = feat_blocks_te[feat_name]
+
+            if X_tr_raw.shape[1] == 0:
+                continue
+
+            y_tr = enc.transform(df_tr_v["dataset"].values)
+            y_te = enc.transform(df_te_v["dataset"].values)
+
+            for model_name, model in models.items():
+                m = evaluate_domain(X_tr_raw, y_tr, X_te_raw, y_te,
+                                    class_names, model_name, model)
+                m.update({
+                    "Arch Mode":    arch_mode,
+                    "DA Variant":   da_variant,
+                    "Feature Block": feat_name,
+                    "N Domains":    n_domains,
+                    "N Train":      len(X_tr_raw),
+                    "N Test":       len(X_te_raw),
+                })
+                records.append(m)
+                print(f"    {feat_name:<12} {model_name:<20} "
+                      f"Acc={m['Accuracy']:.3f}  AUC={m['AUC']:.3f}  "
+                      f"Gap={m['Gap']:+.3f}")
+
+    return records
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Comparison table: baseline vs coral vs mmd
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_comparison(df):
+    """
+    For each (arch_mode, feature_block, model), compute delta metrics
+    relative to baseline.
+    """
+    rows = []
+    for (arch, feat, model), grp in df.groupby(["Arch Mode", "Feature Block", "Model"]):
+        base = grp[grp["DA Variant"] == "baseline"]
+        if base.empty:
+            continue
+        b = base.iloc[0]
+        for da in ["coral", "mmd"]:
+            var = grp[grp["DA Variant"] == da]
+            if var.empty:
+                continue
+            v = var.iloc[0]
+            rows.append({
+                "Arch Mode":     arch,
+                "Feature Block": feat,
+                "Model":         model,
+                "DA Variant":    da,
+                # absolute values
+                "Acc_baseline":  b["Accuracy"],
+                "Acc_da":        v["Accuracy"],
+                "AUC_baseline":  b["AUC"],
+                "AUC_da":        v["AUC"],
+                "BalAcc_baseline": b["Balanced Acc"],
+                "BalAcc_da":     v["Balanced Acc"],
+                # deltas (negative = more domain-invariant = better)
+                "Acc_delta":     round(v["Accuracy"]     - b["Accuracy"],     4),
+                "AUC_delta":     round(v["AUC"]          - b["AUC"],          4),
+                "BalAcc_delta":  round(v["Balanced Acc"] - b["Balanced Acc"], 4),
+            })
+    return pd.DataFrame(rows)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Plots
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_heatmap(df, arch_mode):
+    """Accuracy heatmap: rows = DA variant × feature block, cols = model."""
+    df_arch = df[df["Arch Mode"] == arch_mode].copy()
+    df_arch["Row"] = df_arch["DA Variant"] + " | " + df_arch["Feature Block"]
+    pivot = df_arch.pivot_table(
+        index="Row", columns="Model", values="Accuracy", aggfunc="mean")
+
+    fig, ax = plt.subplots(figsize=(12, max(4, len(pivot) * 0.55 + 2)))
+    sns.heatmap(pivot, annot=True, fmt=".3f", cmap="Reds",
+                vmin=0.0, vmax=1.0, linewidths=0.4,
+                cbar_kws={"label": "Domain classification accuracy"},
+                ax=ax)
+    ax.set_title(f"Domain separability — {arch_mode}\n"
+                 f"(lower = more domain-invariant)", fontsize=11)
+    ax.set_xlabel("Classifier")
+    ax.set_ylabel("DA variant | Feature block")
+    plt.tight_layout()
+    out = os.path.join(RESULTS_PATH,
+                       f"domain_classifier_heatmap_{arch_mode}.png")
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  Heatmap saved -> {out}")
+
+
+def plot_delta(comp_df, arch_mode):
+    """Delta bar chart: how much does each DA method reduce domain accuracy."""
+    sub = comp_df[comp_df["Arch Mode"] == arch_mode].copy()
+    if sub.empty:
         return
 
-    # determine which feature modes to run based on ARCH_MODE or CLI arg
-    active_modes = feature_modes
-    chosen = arch_mode or ARCH_MODE
-    if chosen:
-        # allow comma-separated list or single value; 'all' means run everything
-        if isinstance(chosen, str):
-            parts = [p.strip() for p in chosen.split(",") if p.strip()]
-        else:
-            parts = list(chosen)
-        # build selected modes with some convenient shorthands
-        selected = []
-        for p in parts:
-            pl = p.lower()
-            if pl == "all":
-                selected = feature_modes
-                break
-            if pl == "mmd":
-                for m in feature_modes:
-                    if m.endswith("_mmd") and m not in selected:
-                        selected.append(m)
-                continue
-            # exact match or prefix match (e.g., 'classifier' -> 'classifier' and 'classifier_mmd')
-            matched_any = False
-            for m in feature_modes:
-                if m == p or m.lower().startswith(pl):
-                    if m not in selected:
-                        selected.append(m)
-                    matched_any = True
-            if not matched_any:
-                # record as missing for warning later
-                selected.append(f"__MISSING__::{p}")
+    # Average delta across models, per (DA Variant, Feature Block)
+    agg = sub.groupby(["DA Variant", "Feature Block"])["Acc_delta"].mean().reset_index()
 
-        # separate missing and valid
-        missing = [s.split("::", 1)[1] for s in selected if s.startswith("__MISSING__::")]
-        active_modes = [s for s in selected if not s.startswith("__MISSING__::")]
-        if missing:
-            print(f"Warning: requested ARCH_MODE entries not found: {missing}")
-        if not active_modes:
-            print("No matching feature modes selected. Exiting.")
-            return
+    fig, ax = plt.subplots(figsize=(10, 4))
+    x = np.arange(len(agg["Feature Block"].unique()))
+    width = 0.35
+    feats = sorted(agg["Feature Block"].unique())
+    colors = {"coral": "#DD8452", "mmd": "#4C72B0"}
 
-    for mode in active_modes:
-        print(f"Feature set: {mode}")
-        for model_name, model in models.items():
-            print(f"  -> {model_name}")
-            result = evaluate_combo(mode, model_name, model)
-            results.append(result)
+    for i, da in enumerate(["coral", "mmd"]):
+        vals = [agg[(agg["DA Variant"] == da) & (agg["Feature Block"] == f)]["Acc_delta"].values
+                for f in feats]
+        vals = [v[0] if len(v) > 0 else 0.0 for v in vals]
+        ax.bar(x + (i - 0.5) * width, vals, width,
+               label=da.upper(), color=colors[da], alpha=0.85)
 
-    summary_df = pd.DataFrame([
-        {
-            "Feature Set": r["Feature Set"],
-            "Model": r["Model"],
-            "Train Samples": r["Train Samples"],
-            "Test Samples": r["Test Samples"],
-            "Raw Features": r["Raw Features"],
-            "Kept Features": r["Kept Features"],
-            "Domains": r["Domains"],
-            "Chance": round(r["Chance"], 4),
-            "Accuracy": round(r["Accuracy"], 4),
-            "Balanced Acc": round(r["Balanced Acc"], 4),
-            "Macro F1": round(r["Macro F1"], 4),
-            "Gap vs Chance": round(r["Gap vs Chance"], 4),
-        }
-        for r in results
-    ])
-
-    summary_path = os.path.join(RESULTS_PATH, "domain_classifier_benchmark.csv")
-    summary_df.to_csv(summary_path, index=False)
-
-    pivot = summary_df.pivot(index="Feature Set", columns="Model", values="Accuracy").reindex(active_modes)
-    chance_by_mode = summary_df.groupby("Feature Set")["Chance"].first().reindex(active_modes)
-
-    plt.figure(figsize=(11, 6))
-    ax = sns.heatmap(
-        pivot,
-        annot=True,
-        fmt=".3f",
-        cmap="Reds",
-        vmin=0.0,
-        vmax=1.0,
-        cbar_kws={"label": "Dataset classification accuracy"},
-    )
-    for idx, mode in enumerate(pivot.index):
-        ax.hlines(idx, *ax.get_xlim(), colors="white", linewidth=0.5)
-    plt.title("How easily each feature set reveals the dataset/domain", fontsize=13, pad=12)
-    plt.xlabel("Classifier")
-    plt.ylabel("Feature set")
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+    ax.set_xticks(x)
+    ax.set_xticklabels(feats)
+    ax.set_ylabel("Δ Accuracy vs baseline\n(negative = more domain-invariant)")
+    ax.set_title(f"DA effectiveness — {arch_mode}")
+    ax.legend()
     plt.tight_layout()
-    overview_path = os.path.join(RESULTS_PATH, "domain_classifier_heatmap.png")
-    plt.savefig(overview_path, dpi=160)
-    plt.close()
+    out = os.path.join(RESULTS_PATH,
+                       f"domain_classifier_delta_{arch_mode}.png")
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  Delta plot saved -> {out}")
 
-    # Compare MMD vs non-MMD for same base architectures and save comparison CSVs
-    comps_saved = []
-    bases = sorted({m.replace("_mmd", "") for m in active_modes})
-    for base in bases:
-        non = base
-        mmd = base + "_mmd"
-        if non in active_modes and mmd in active_modes:
-            comp_rows = []
-            for model_name in summary_df["Model"].unique():
-                row_non = summary_df[(summary_df["Feature Set"] == non) & (summary_df["Model"] == model_name)]
-                row_mmd = summary_df[(summary_df["Feature Set"] == mmd) & (summary_df["Model"] == model_name)]
-                if row_non.empty or row_mmd.empty:
-                    continue
-                rn = row_non.iloc[0]
-                rm = row_mmd.iloc[0]
-                comp = {
-                    "Base": base,
-                    "Model": model_name,
-                    "Accuracy_nonmmd": rn["Accuracy"],
-                    "Accuracy_mmd": rm["Accuracy"],
-                    "Accuracy_diff": rm["Accuracy"] - rn["Accuracy"],
-                    "BalancedAcc_nonmmd": rn["Balanced Acc"],
-                    "BalancedAcc_mmd": rm["Balanced Acc"],
-                    "BalancedAcc_diff": rm["Balanced Acc"] - rn["Balanced Acc"],
-                    "MacroF1_nonmmd": rn["Macro F1"],
-                    "MacroF1_mmd": rm["Macro F1"],
-                    "MacroF1_diff": rm["Macro F1"] - rn["Macro F1"],
-                    "KeptFeatures_nonmmd": rn["Kept Features"],
-                    "KeptFeatures_mmd": rm["Kept Features"],
-                    "KeptFeatures_diff": rm["Kept Features"] - rn["Kept Features"],
-                }
-                comp_rows.append(comp)
 
-            if comp_rows:
-                comp_df = pd.DataFrame(comp_rows)
-                comp_path = os.path.join(RESULTS_PATH, f"domain_shift_comparison_{base}.csv")
-                comp_df.to_csv(comp_path, index=False)
-                comps_saved.append(comp_path)
-                print(f"\nDomain-shift comparison saved -> {comp_path}")
-                for _, r in comp_df.iterrows():
-                    print(f"  {r['Model']}: Accuracy diff={r['Accuracy_diff']:.4f}, BalancedAcc diff={r['BalancedAcc_diff']:.4f}, MacroF1 diff={r['MacroF1_diff']:.4f}")
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
-    print("\nSummary table:")
-    print(summary_df.sort_values(["Feature Set", "Accuracy"], ascending=[True, False]).to_string(index=False))
+def main(arch_mode_filter=None):
+    os.makedirs(RESULTS_PATH, exist_ok=True)
 
-    print("\nBest model per feature set:")
-    for mode in active_modes:
-        sub = summary_df[summary_df["Feature Set"] == mode].sort_values("Accuracy", ascending=False).iloc[0]
-        print(
-            f"  {mode}: {sub['Model']} | acc={sub['Accuracy']:.2%} | chance={chance_by_mode[mode]:.2%} | gap={sub['Gap vs Chance']:.2%}"
-        )
+    arch_modes = discover_arch_modes(CHECKPOINT_PATH)
+    if not arch_modes:
+        print("No complete variant sets found. Run feature_extraction.py first.")
+        sys.exit(1)
 
-    print(f"\nSaved summary -> {summary_path}")
-    print(f"Saved heatmap -> {overview_path}")
+    if arch_mode_filter:
+        arch_modes = [a for a in arch_modes if a == arch_mode_filter]
+        if not arch_modes:
+            print(f"Arch mode '{arch_mode_filter}' not found. Available: "
+                  f"{discover_arch_modes(CHECKPOINT_PATH)}")
+            sys.exit(1)
 
-    strongest = summary_df.sort_values("Accuracy", ascending=False).iloc[0]
-    weakest = summary_df.sort_values("Accuracy", ascending=True).iloc[0]
-    print(
-        "\nInterpretation: if the dataset is easy to classify from the extracted features, the features still carry domain information. "
-        f"In this run, the strongest separation is {strongest['Feature Set']} + {strongest['Model']} ({strongest['Accuracy']:.2%}), "
-        f"while the weakest is {weakest['Feature Set']} + {weakest['Model']} ({weakest['Accuracy']:.2%}). "
-        "A lower accuracy for `classifier_mmd` than for `classifier` or `autoencoder` would suggest that MMD reduces the domain shift."
+    all_records = []
+    for arch in arch_modes:
+        print(f"\n{'═'*60}")
+        print(f"  ARCH MODE: {arch.upper()}")
+        print(f"{'═'*60}")
+        all_records.extend(run_arch(arch))
+
+    if not all_records:
+        print("No results produced.")
+        return
+
+    results_df  = pd.DataFrame(all_records)
+    comp_df     = build_comparison(results_df)
+
+    # ── Save CSVs ─────────────────────────────────────────────────────────────
+    results_path = os.path.join(RESULTS_PATH, "domain_classifier_results.csv")
+    comp_path    = os.path.join(RESULTS_PATH, "domain_classifier_comparison.csv")
+    results_df.to_csv(results_path, index=False)
+    comp_df.to_csv(comp_path,       index=False)
+    print(f"\nResults saved     -> {results_path}")
+    print(f"Comparison saved  -> {comp_path}")
+
+    # ── Plots ─────────────────────────────────────────────────────────────────
+    for arch in arch_modes:
+        plot_heatmap(results_df, arch)
+        plot_delta(comp_df, arch)
+
+    # ── Console summary ───────────────────────────────────────────────────────
+    print(f"\n{'═'*70}")
+    print(" SUMMARY: mean accuracy across models (lower domain acc = better DA)")
+    print(f"{'═'*70}")
+    summary = (
+        results_df.groupby(["Arch Mode", "DA Variant", "Feature Block"])
+        ["Accuracy"].mean().round(4).reset_index()
     )
+    for arch in arch_modes:
+        print(f"\n  {arch}:")
+        sub = summary[summary["Arch Mode"] == arch]
+        print(sub[["DA Variant","Feature Block","Accuracy"]].to_string(index=False))
+
+    if not comp_df.empty:
+        print(f"\n{'─'*70}")
+        print(" DELTA vs baseline (negative = domain confusion increased = better)")
+        print(f"{'─'*70}")
+        delta_summary = (
+            comp_df.groupby(["Arch Mode","DA Variant","Feature Block"])
+            [["Acc_delta","AUC_delta"]].mean().round(4).reset_index()
+        )
+        print(delta_summary.to_string(index=False))
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benchmark domain classifiers on enriched feature sets")
-    parser.add_argument("--arch-mode", dest="arch_mode", help="Comma-separated feature modes to run (or 'all'). Overrides ARCH_MODE env var.")
+    parser = argparse.ArgumentParser(
+        description="Domain classifier: baseline vs CORAL vs MMD")
+    parser.add_argument("--arch-mode", default=None,
+                        help="Filter to a single arch mode (e.g. 'autoencoder')")
     args = parser.parse_args()
-    try:
-        main(arch_mode=args.arch_mode)
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    main(arch_mode_filter=args.arch_mode)

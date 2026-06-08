@@ -1,7 +1,21 @@
+"""
+feature_extraction.py
+=====================
+Pipeline:
+  1. Train / load encoder (autoencoder or classifier) on all windows
+  2. Extract 46-dim patient-level features:
+       - 32 latent (mean, std, max, slope of 8-dim latent across all windows)
+       - 8  handcrafted stance (sway area, lateral dominance, p_sway, p_tremor × mean+std)
+       - 6  handcrafted walk   (jerk, step_cv, dom_freq × mean+std)
+  3. Save baseline CSV (no domain adaptation)
+  4. Apply CORAL (wearpd as target) → save _coral CSV
+  5. Apply MMD mean-shift (wearpd as target) → save _mmd CSV
+  6. Generate UMAP plots for each variant
+"""
+
 import argparse
-import sys
 import os
-from model import CnnGru, ImuEncoder
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -9,90 +23,106 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-
-from train import train_autoencoder, train_classifier
-
+from scipy.linalg import fractional_matrix_power
 from scipy.signal import butter, filtfilt, find_peaks
 from sklearn.model_selection import train_test_split
 
+from model import CnnGru, ImuEncoder
+from train import train_autoencoder, train_classifier
 
+# ── Config ────────────────────────────────────────────────────────────────────
 DATA_PATH       = "posturalInstability/cnn_gru/data/"
 CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
 LATENT_DIM      = 8
+TARGET_DOMAIN   = "wearpd"          # CORAL / MMD target
+CORAL_REG       = 1e-2              # regularisation for CORAL covariance
+MIN_CORAL_SAMPLES = 8               # minimum samples per domain for CORAL
 
-def _lazy_import_umap():
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UMAP
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _lazy_umap():
     try:
-        import umap  # type: ignore
+        import umap
         return umap
-    except ImportError as first_error:
+    except ImportError:
         try:
-            import umap.umap_ as umap  # type: ignore
+            import umap.umap_ as umap
             return umap
         except ImportError:
-            raise ImportError("UMAP is not installed.") from first_error
+            raise ImportError("Install umap-learn to generate UMAP plots.")
+
 
 def make_umap_plot(df, output_dir, mode_tag):
-    umap = _lazy_import_umap()
-    feat_cols = [c for c in df.columns if c.startswith("Feat_")]
-    if not feat_cols: return
-    
-    # Ora il blocco latente è di 32 dimensioni (4 stats * 8 dims)
-    n_latent_cols = 4 * LATENT_DIM  
-    lat_cols = feat_cols[:n_latent_cols] if len(feat_cols) >= n_latent_cols else feat_cols
-    latent_values = df[lat_cols].to_numpy(dtype=np.float32)
-    reducer = umap.UMAP(n_components=2, random_state=RANDOM_STATE)
-    embedding = reducer.fit_transform(latent_values)
+    try:
+        umap = _lazy_umap()
+    except ImportError as e:
+        print(f"  [UMAP skipped] {e}")
+        return None
+
+    feat_cols  = [c for c in df.columns if c.startswith("Feat_")]
+    lat_cols   = feat_cols[: 4 * LATENT_DIM]
+    valid_mask = df[lat_cols].notna().all(axis=1)
+    df_v       = df[valid_mask]
+
+    if len(df_v) < 5:
+        print("  [UMAP skipped] too few valid rows.")
+        return None
+
+    embedding = umap.UMAP(n_components=2, random_state=RANDOM_STATE).fit_transform(
+        df_v[lat_cols].to_numpy(dtype=np.float32))
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    for dataset_name in pd.unique(df["dataset"]):
-        mask = df["dataset"] == dataset_name
-        axes[0].scatter(embedding[mask, 0], embedding[mask, 1], label=dataset_name, alpha=0.65, s=35)
+    for ds in pd.unique(df_v["dataset"]):
+        m = df_v["dataset"] == ds
+        axes[0].scatter(embedding[m, 0], embedding[m, 1], label=ds, alpha=0.65, s=35)
     axes[0].set_title("Latent space by dataset")
-    axes[0].legend(loc="best", fontsize=8)
+    axes[0].legend(fontsize=8)
 
-    label_colors = {0: "steelblue", 1: "tomato"}
-    label_names = {0: "HC", 1: "PD"}
-    for lbl, col in label_colors.items():
-        mask = df["y_true"] == lbl
-        axes[1].scatter(embedding[mask, 0], embedding[mask, 1], c=col, label=label_names[lbl], alpha=0.65, s=35)
+    for lbl, col, name in [(0, "steelblue", "HC"), (1, "tomato", "PD")]:
+        m = df_v["y_true"] == lbl
+        axes[1].scatter(embedding[m, 0], embedding[m, 1], c=col, label=name, alpha=0.65, s=35)
     axes[1].set_title("Latent space by class")
-    axes[1].legend(loc="best")
-    fig.suptitle(f"UMAP latent space - {mode_tag}", y=1.02)
+    axes[1].legend()
+
+    fig.suptitle(f"UMAP — {mode_tag}", y=1.02)
     fig.tight_layout()
-    out_path = os.path.join(output_dir, f"umap_latent_{mode_tag}.png")
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    out = os.path.join(output_dir, f"umap_latent_{mode_tag}.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    return out_path
+    print(f"  UMAP saved -> {out}")
+    return out
 
 
-# ═════════════════════════════════════════════
-# 1. DATA LOADING AND SPLITTING
-# ═════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Data loading & splitting
+# ══════════════════════════════════════════════════════════════════════════════
 
 def load_data():
     windows      = np.load(os.path.join(DATA_PATH, "windows.npy"))
     labels_raw   = np.load(os.path.join(DATA_PATH, "labels.npy")).astype(np.float32)
     metadata     = pd.read_csv(os.path.join(DATA_PATH, "metadata.csv"))
-
-    labels_4cls   = np.clip(labels_raw, 0, 3).astype(np.int32)
+    labels_4cls  = np.clip(labels_raw, 0, 3).astype(np.int32)
     binary_labels = (labels_4cls >= 1).astype(np.float32)
-
-    print(f"Windows        : {windows.shape}")
-    print(f"4-class dist   : {dict(zip(*np.unique(labels_4cls, return_counts=True)))}")
-    print(f"Binary dist    : {dict(zip(*np.unique(binary_labels, return_counts=True)))}")
+    print(f"Windows      : {windows.shape}")
+    print(f"4-class dist : {dict(zip(*np.unique(labels_4cls, return_counts=True)))}")
+    print(f"Binary dist  : {dict(zip(*np.unique(binary_labels, return_counts=True)))}")
     return windows, labels_4cls, binary_labels, metadata
+
 
 def subject_mask(metadata, subjects_df):
     meta_idx = pd.MultiIndex.from_frame(metadata[["dataset", "subjectID"]])
     subj_idx = pd.MultiIndex.from_frame(subjects_df[["dataset", "subjectID"]])
     return meta_idx.isin(subj_idx)
 
+
 def patient_split(metadata, binary_labels):
     subjects = metadata[["dataset", "subjectID"]].drop_duplicates().copy()
-
     subj_bin = []
     for _, s in subjects.iterrows():
         m = (metadata["dataset"] == s["dataset"]) & (metadata["subjectID"] == s["subjectID"])
@@ -114,210 +144,363 @@ def patient_split(metadata, binary_labels):
     s_train = pd.concat(train_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
     s_val   = pd.concat(val_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
     s_test  = pd.concat(test_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
-    for df in (s_train, s_val, s_test): df.drop(columns=["bin_label"], inplace=True)
+    for df in (s_train, s_val, s_test):
+        df.drop(columns=["bin_label"], inplace=True)
     print(f"\nSplit — train: {len(s_train)}, val: {len(s_val)}, test: {len(s_test)} patients")
     return s_train, s_val, s_test
 
+
 def ensure_validation_domain_coverage(s_train, s_val):
-    train_domains = list(pd.unique(s_train["dataset"]))
-    val_domains = set(pd.unique(s_val["dataset"]))
-    missing = [ds for ds in train_domains if ds not in val_domains]
-    if not missing: return s_train, s_val
-
-    s_train = s_train.copy()
-    s_val = s_val.copy()
-    moved_rows = []
-    for ds_name in missing:
-        candidates = s_train[s_train["dataset"] == ds_name]
-        if len(candidates) <= 1: continue
-        row = candidates.iloc[[0]]
+    missing = [ds for ds in pd.unique(s_train["dataset"])
+               if ds not in set(pd.unique(s_val["dataset"]))]
+    if not missing:
+        return s_train, s_val
+    s_train, s_val = s_train.copy(), s_val.copy()
+    moved = []
+    for ds in missing:
+        cands = s_train[s_train["dataset"] == ds]
+        if len(cands) <= 1:
+            continue
+        row = cands.iloc[[0]]
         s_train = s_train.drop(index=row.index)
-        moved_rows.append(row)
-
-    if moved_rows:
-        s_val = pd.concat([s_val] + moved_rows, ignore_index=True).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+        moved.append(row)
+    if moved:
+        s_val   = pd.concat([s_val] + moved, ignore_index=True).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
         s_train = s_train.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
     return s_train, s_val
 
-# ═════════════════════════════════════════════
-# 2. HANDCRAFTED FEATURES
-# ═════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Handcrafted features
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _bandpass(signal, lo=0.03, hi=1.0, fs=FS, order=2):
-    nyq  = 0.5 * fs
+    nyq = 0.5 * fs
     lo_n = np.clip(lo / nyq, 1e-5, 0.99)
     hi_n = np.clip(hi / nyq, lo_n + 1e-5, 0.99)
     b, a = butter(order, [lo_n, hi_n], btype="band")
-    if len(signal) < max(len(b), len(a)) * 3: return signal
+    if len(signal) < max(len(b), len(a)) * 3:
+        return signal
     return filtfilt(b, a, signal)
+
 
 def stance_features(window, fs=FS):
     acc_ml = _bandpass(window[:, 1], fs=fs)
     acc_ap = _bandpass(window[:, 2], fs=fs)
-    cov       = np.cov(acc_ap, acc_ml)
-    det       = np.linalg.det(cov)
-    sway_area = np.pi * 5.991 * np.sqrt(max(det, 0.0))
-    ml_var = np.var(acc_ml)
-    ap_var = np.var(acc_ap)
-    lateral_dominance = ml_var / (ap_var + 1e-8)
-    fft_ml = np.abs(np.fft.rfft(acc_ml)) ** 2
-    freqs  = np.fft.rfftfreq(len(acc_ml), d=1.0 / fs)
-    p_tot  = np.sum(fft_ml) + 1e-10
-    p_sway = np.sum(fft_ml[(freqs >= 0.1) & (freqs <= 0.5)]) / p_tot
-    p_tremor = np.sum(fft_ml[(freqs >= 8) & (freqs <= 12)]) / p_tot
-    return np.array([sway_area, lateral_dominance, p_sway, p_tremor], dtype=np.float32)
+    cov    = np.cov(acc_ap, acc_ml)
+    det    = np.linalg.det(cov)
+    sway   = np.pi * 5.991 * np.sqrt(max(det, 0.0))
+    lat_dom = np.var(acc_ml) / (np.var(acc_ap) + 1e-8)
+    fft_ml  = np.abs(np.fft.rfft(acc_ml)) ** 2
+    freqs   = np.fft.rfftfreq(len(acc_ml), d=1.0 / fs)
+    p_tot   = np.sum(fft_ml) + 1e-10
+    p_sway  = np.sum(fft_ml[(freqs >= 0.1) & (freqs <= 0.5)]) / p_tot
+    p_trem  = np.sum(fft_ml[(freqs >= 8)   & (freqs <= 12)]) / p_tot
+    return np.array([sway, lat_dom, p_sway, p_trem], dtype=np.float32)
+
 
 def walking_features(window, fs=FS):
-    acc_v    = window[:, 0]
-    acc_ap   = window[:, 2]
-    jerk_mag = np.linalg.norm(np.diff(window[:, :3], axis=0) * fs, axis=1)
-    norm_jerk = np.sum(jerk_mag) / (len(acc_v) / fs + 1e-8)
+    acc_v   = window[:, 0]
+    acc_ap  = window[:, 2]
+    jerk    = np.linalg.norm(np.diff(window[:, :3], axis=0) * fs, axis=1)
+    n_jerk  = np.sum(jerk) / (len(acc_v) / fs + 1e-8)
     peaks, _ = find_peaks(acc_v, distance=int(fs * 0.3), prominence=np.std(acc_v) * 0.3)
     step_cv = 0.0
     if len(peaks) > 1:
-        intervals = np.diff(peaks) / fs
-        step_cv = np.std(intervals) / (np.mean(intervals) + 1e-8)
-    fft_ap = np.abs(np.fft.rfft(acc_ap))
-    freqs  = np.fft.rfftfreq(len(acc_ap), d=1.0 / fs)
-    valid  = (freqs > 0.5) & (freqs < 4.0)
-    dom_freq = float(freqs[np.argmax(fft_ap[valid])]) if valid.any() else 0.0
-    return np.array([norm_jerk, step_cv, dom_freq if np.isfinite(dom_freq) else 0.0], dtype=np.float32)
+        ivs = np.diff(peaks) / fs
+        step_cv = np.std(ivs) / (np.mean(ivs) + 1e-8)
+    fft_ap  = np.abs(np.fft.rfft(acc_ap))
+    freqs   = np.fft.rfftfreq(len(acc_ap), d=1.0 / fs)
+    valid   = (freqs > 0.5) & (freqs < 4.0)
+    dom_f   = float(freqs[np.argmax(fft_ap[valid])]) if valid.any() else 0.0
+    return np.array([n_jerk, step_cv, dom_f if np.isfinite(dom_f) else 0.0], dtype=np.float32)
 
-# ═════════════════════════════════════════════
-# 3. PATIENT-LEVEL FEATURE EXTRACTION (46 DIMS)
-# ═════════════════════════════════════════════
 
 def _agg(rows, n_feat):
-    if len(rows) == 0: return np.zeros(n_feat * 2, dtype=np.float32)
+    if len(rows) == 0:
+        return np.zeros(n_feat * 2, dtype=np.float32)
     arr = np.array(rows, dtype=np.float32)
     return np.concatenate([arr.mean(0), arr.std(0)])
 
-def _lat_agg(rows):
-    if len(rows) == 0: return None
-    arr = np.array(rows, dtype=np.float32)  
-    n = arr.shape[0]
-    if n >= 3:
-        t = np.arange(n, dtype=np.float32)
-        t_centered = t - t.mean()
-        t_var = np.dot(t_centered, t_centered) + 1e-8
-        slopes = np.dot(t_centered, arr) / t_var
-    else:
-        slopes = np.zeros(arr.shape[1], dtype=np.float32)
-    return np.concatenate([arr.mean(0), arr.std(0), arr.max(0), slopes])
 
-def extract_patient_features(windows, binary_labels, labels_4cls, metadata, subjects_df, enc_shared):
-    X, y, y_4cls, dsets, sids = [], [], [], [], []
-    
-    # NaN shapes: Latent (32), HC Stance (8), HC Walk (6)
-    nan_lat = np.full(LATENT_DIM * 4, np.nan, dtype=np.float32)
+def _lat_agg(rows):
+    if len(rows) == 0:
+        return None
+    arr = np.array(rows, dtype=np.float32)
+    n   = arr.shape[0]
+    if n >= 3:
+        t   = np.arange(n, dtype=np.float32)
+        tc  = t - t.mean()
+        tv  = np.dot(tc, tc) + 1e-8
+        slp = np.dot(tc, arr) / tv
+    else:
+        slp = np.zeros(arr.shape[1], dtype=np.float32)
+    return np.concatenate([arr.mean(0), arr.std(0), arr.max(0), slp])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Patient-level feature extraction (46 dims)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_patient_features(windows, binary_labels, labels_4cls,
+                              metadata, subjects_df, enc_shared):
+    X, y, y4, dsets, sids = [], [], [], [], []
+    nan_lat  = np.full(LATENT_DIM * 4, np.nan, dtype=np.float32)
     nan_hc_s = np.full(8, np.nan, dtype=np.float32)
     nan_hc_w = np.full(6, np.nan, dtype=np.float32)
 
     for _, s in subjects_df.iterrows():
         m = (metadata["dataset"] == s["dataset"]) & (metadata["subjectID"] == s["subjectID"])
-        if m.sum() == 0: continue
-
+        if m.sum() == 0:
+            continue
         p_win  = windows[m].astype("float32")
         p_meta = metadata[m].reset_index(drop=True)
         p_win -= p_win.mean(axis=(0, 1), keepdims=True)
-        p_win = p_win / (p_win.std(axis=(0, 1), keepdims=True) + 1e-8)
+        p_win /= (p_win.std(axis=(0, 1), keepdims=True) + 1e-8)
 
         is_stance  = ((p_meta["taskID"] == 0) | (p_meta["taskID"] == 1)).values
         is_walking = (p_meta["taskID"] == 2).values
-        is_all     = is_stance | is_walking  # Tutte le finestre insieme
-        
-        has_s = is_stance.any()
-        has_w = is_walking.any()
-        has_any = is_all.any()
+        is_all     = is_stance | is_walking
 
-        # 1. LATENT GENERALI: Passo TUTTE le finestre insieme all'encoder
-        lat = _lat_agg(list(enc_shared.get_latent(p_win[is_all]).numpy())) if has_any else nan_lat
-        
-        # 2. HANDCRAFTED SPECIFICHE: Calcolo Sway solo su stance, Jerk solo su walk
-        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4) if has_s else nan_hc_s
-        hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 3) if has_w else nan_hc_w
+        lat  = _lat_agg(list(enc_shared.get_latent(p_win[is_all]).numpy()))  if is_all.any()    else nan_lat
+        hc_s = _agg([stance_features(w)  for w in p_win[is_stance]],  4)    if is_stance.any() else nan_hc_s
+        hc_w = _agg([walking_features(w) for w in p_win[is_walking]], 3)    if is_walking.any() else nan_hc_w
 
-        # Uniamo le feature (32 + 8 + 6 = 46)
         X.append(np.concatenate([lat, hc_s, hc_w]))
         y.append(float(binary_labels[m][0]))
-        y_4cls.append(int(labels_4cls[m][0]))
+        y4.append(int(labels_4cls[m][0]))
         dsets.append(s["dataset"])
         sids.append(s["subjectID"])
 
-    return np.stack(X), np.array(y), np.array(y_4cls), np.array(dsets), np.array(sids)
+    return np.stack(X), np.array(y), np.array(y4), np.array(dsets), np.array(sids)
 
-# ═════════════════════════════════════════════
-# 4. ENCODER TRAINING
-# ═════════════════════════════════════════════
 
-def get_or_train_encoder(task_name, windows, labels_4cls, metadata, s_train, s_val, 
-                         task_filter_fn, input_shape, arch_mode):
-    train_mask = subject_mask(metadata, s_train) & task_filter_fn(metadata)
-    val_mask   = subject_mask(metadata, s_val)   & task_filter_fn(metadata)
-    
-    x_train = windows[train_mask]
-    x_val   = windows[val_mask]
+# ══════════════════════════════════════════════════════════════════════════════
+# Encoder training / loading
+# ══════════════════════════════════════════════════════════════════════════════
 
-    if x_train.shape[0] == 0 or x_val.shape[0] == 0:
-        raise ValueError(f"No windows available for {task_name} encoder.")
-    
-    weights_filename = f"best_{arch_mode}_{task_name}.weights.h5"
-    full_path = os.path.join(CHECKPOINT_PATH, weights_filename)
+def get_or_train_encoder(windows, labels_4cls, metadata,
+                         s_train, s_val, input_shape, arch_mode):
+    train_mask = subject_mask(metadata, s_train) & (metadata["taskID"] <= 2)
+    val_mask   = subject_mask(metadata, s_val)   & (metadata["taskID"] <= 2)
+    x_train, x_val = windows[train_mask], windows[val_mask]
+
+    weights_fn = f"best_{arch_mode}_shared.weights.h5"
+    full_path  = os.path.join(CHECKPOINT_PATH, weights_fn)
 
     if arch_mode == "autoencoder":
         model = ImuEncoder(input_shape=input_shape, latent_dim=LATENT_DIM)
-        model(tf.zeros((1,) + input_shape)) 
+        model(tf.zeros((1,) + input_shape))
         if os.path.exists(full_path):
-            print(f"Loading {arch_mode} weights for {task_name}...")
+            print(f"  Loading autoencoder weights...")
             model.load_weights(full_path)
         else:
-            print(f"Training {arch_mode} for {task_name}...")            
-            train_autoencoder(model, x_train, x_val, CHECKPOINT_PATH, weights_filename)
+            print(f"  Training autoencoder...")
+            train_autoencoder(model, x_train, x_val, CHECKPOINT_PATH, weights_fn)
 
     elif arch_mode == "classifier":
-        y_train = labels_4cls[train_mask]
-        y_val   = labels_4cls[val_mask]
-        n_classes = len(np.unique(labels_4cls)) if len(labels_4cls) > 0 else 4
-        
-        model = CnnGru(input_shape=input_shape, n_classes=n_classes)
-        model(tf.zeros((1,) + input_shape)) 
-        
+        y_tr = labels_4cls[train_mask]
+        y_va = labels_4cls[val_mask]
+        model = CnnGru(input_shape=input_shape,
+                       n_classes=len(np.unique(labels_4cls)))
+        model(tf.zeros((1,) + input_shape))
         if os.path.exists(full_path):
-            print(f"Loading {arch_mode} weights for {task_name}...")
+            print(f"  Loading classifier weights...")
             model.load_weights(full_path)
         else:
-            print(f"Training {arch_mode} for {task_name}...")
-            train_classifier(model, x_train, y_train, x_val, y_val, CHECKPOINT_PATH, weights_filename)
-    
+            print(f"  Training classifier...")
+            train_classifier(model, x_train, y_tr, x_val, y_va,
+                             CHECKPOINT_PATH, weights_fn)
+    else:
+        raise ValueError(f"Unknown arch_mode: {arch_mode}")
+
     return model
 
-def impute_features(train_df, test_df):
-    feat_cols = [c for c in train_df.columns if c.startswith("Feat_")]
-    train_group_means = {}
-    global_means = train_df[feat_cols].mean(skipna=True)
-    
-    for label in train_df["y_true"].unique():
-        mask = train_df["y_true"] == label
-        grp = train_df.loc[mask, feat_cols]
-        train_group_means[label] = grp.mean(skipna=True).fillna(global_means)
 
-    train_df_imp = train_df.copy()
-    test_df_imp = test_df.copy()
-    
-    for label, mean_vals in train_group_means.items():
-        mask_tr = train_df_imp["y_true"] == label
-        train_df_imp.loc[mask_tr, feat_cols] = train_df_imp.loc[mask_tr, feat_cols].fillna(mean_vals)
-        
-        mask_te = test_df_imp["y_true"] == label
-        test_df_imp.loc[mask_te, feat_cols] = test_df_imp.loc[mask_te, feat_cols].fillna(mean_vals)
+# ══════════════════════════════════════════════════════════════════════════════
+# Domain adaptation — CORAL
+# ══════════════════════════════════════════════════════════════════════════════
 
-    train_df_imp[feat_cols] = train_df_imp[feat_cols].fillna(global_means)
-    test_df_imp[feat_cols] = test_df_imp[feat_cols].fillna(global_means)
-    return train_df_imp, test_df_imp
+def fit_coral(X_fit, domains_fit, target_domain=TARGET_DOMAIN,
+              reg=CORAL_REG, min_samples=MIN_CORAL_SAMPLES):
+    """
+    Fit CORAL parameters on the training set only.
+    Target = wearpd. Sources = all other domains.
+    Returns a stats dict to be passed to transform_coral.
+    """
+    valid = ~np.isnan(X_fit).any(axis=1)
+    n_feat = X_fit.shape[1]
+
+    # ── Target covariance (wearpd) ────────────────────────────────────────────
+    tgt_mask = valid & (domains_fit == target_domain)
+    if tgt_mask.sum() < min_samples:
+        print(f"  [CORAL] Target '{target_domain}' has only {tgt_mask.sum()} samples "
+              f"(min={min_samples}) — CORAL disabled.")
+        return {}
+
+    X_tgt  = X_fit[tgt_mask]
+    mu_t   = X_tgt.mean(axis=0)
+    cov_t  = np.cov(X_tgt - mu_t, rowvar=False) + reg * np.eye(n_feat)
+    try:
+        cov_t_half = np.real(fractional_matrix_power(cov_t, 0.5))
+    except Exception as e:
+        print(f"  [CORAL] Failed to compute target cov^0.5: {e}. CORAL disabled.")
+        return {}
+
+    stats = {
+        "target_domain": target_domain,
+        "mu_target":     mu_t,
+        "cov_t_half":    cov_t_half,
+        "sources":       {},
+    }
+
+    # ── Source covariances ────────────────────────────────────────────────────
+    for ds in np.unique(domains_fit):
+        if ds == target_domain:
+            continue
+        src_mask = valid & (domains_fit == ds)
+        n = src_mask.sum()
+        if n < min_samples:
+            print(f"  [CORAL] Source '{ds}' has only {n} samples "
+                  f"(min={min_samples}) — skipped.")
+            continue
+        X_src = X_fit[src_mask]
+        mu_s  = X_src.mean(axis=0)
+        # Check for NaN/Inf before computing matrix power
+        cov_s = np.cov(X_src - mu_s, rowvar=False) + reg * np.eye(n_feat)
+        if not np.isfinite(cov_s).all():
+            print(f"  [CORAL] Source '{ds}' covariance has NaN/Inf — skipped.")
+            continue
+        try:
+            cov_s_inv_half = np.real(fractional_matrix_power(cov_s, -0.5))
+        except Exception as e:
+            print(f"  [CORAL] Source '{ds}' cov^-0.5 failed: {e} — skipped.")
+            continue
+        stats["sources"][ds] = {"mu_s": mu_s, "cov_s_inv_half": cov_s_inv_half}
+        print(f"  [CORAL] Source '{ds}': {n} samples — fitted OK.")
+
+    return stats
+
+
+def transform_coral(X, domains, stats):
+    """
+    Apply CORAL transform fitted by fit_coral.
+    Target domain (wearpd) is left unchanged.
+    Works on any split (train, val, test).
+    """
+    if not stats:
+        return np.copy(X)
+
+    X_out     = np.copy(X)
+    mu_t      = stats["mu_target"]
+    cov_t_half = stats["cov_t_half"]
+    tgt       = stats["target_domain"]
+
+    for ds in np.unique(domains):
+        if ds == tgt:
+            continue
+        if ds not in stats["sources"]:
+            continue
+        idx = np.where((domains == ds) & ~np.isnan(X[:, 0]))[0]
+        if len(idx) == 0:
+            continue
+        mu_s          = stats["sources"][ds]["mu_s"]
+        cov_s_inv_half = stats["sources"][ds]["cov_s_inv_half"]
+        X_ds          = X[idx]
+        X_out[idx]    = (X_ds - mu_s) @ cov_s_inv_half @ cov_t_half + mu_t
+
+    return X_out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Domain adaptation — MMD mean shift
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fit_mmd_shift(X_fit, domains_fit, target_domain=TARGET_DOMAIN,
+                  min_samples=5):
+    """
+    Fit MMD mean-shift on training set.
+    For each source domain, the shift vector = mu_target - mu_source.
+    Very stable even with few samples (requires only mean estimation).
+    """
+    valid = ~np.isnan(X_fit).any(axis=1)
+    tgt_mask = valid & (domains_fit == target_domain)
+
+    if tgt_mask.sum() < min_samples:
+        print(f"  [MMD] Target '{target_domain}' has only {tgt_mask.sum()} samples — MMD disabled.")
+        return {}
+
+    mu_t = X_fit[tgt_mask].mean(axis=0)
+    stats = {"target_domain": target_domain, "mu_target": mu_t, "shifts": {}}
+
+    for ds in np.unique(domains_fit):
+        if ds == target_domain:
+            continue
+        src_mask = valid & (domains_fit == ds)
+        n = src_mask.sum()
+        if n < min_samples:
+            print(f"  [MMD] Source '{ds}' has only {n} samples — skipped.")
+            continue
+        mu_s = X_fit[src_mask].mean(axis=0)
+        shift = mu_t - mu_s
+        stats["shifts"][ds] = shift
+        print(f"  [MMD] Source '{ds}': {n} samples, "
+              f"shift norm={np.linalg.norm(shift):.4f}")
+
+    return stats
+
+
+def transform_mmd_shift(X, domains, stats):
+    """
+    Apply MMD mean-shift fitted by fit_mmd_shift.
+    Target domain left unchanged.
+    Works on any split.
+    """
+    if not stats:
+        return np.copy(X)
+
+    X_out = np.copy(X)
+    for ds, shift in stats["shifts"].items():
+        idx = np.where((domains == ds) & ~np.isnan(X[:, 0]))[0]
+        if len(idx) == 0:
+            continue
+        X_out[idx] += shift
+
+    return X_out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CSV builder
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_df(X, y, y4, dsets, sids):
+    df = pd.DataFrame(X, columns=[f"Feat_{i}" for i in range(X.shape[1])])
+    df["y_true"]      = y
+    df["y_true_4cls"] = y4
+    df["dataset"]     = dsets
+    df["subjectID"]   = sids
+    return df
+
+
+def save_variant(train_df, test_df, arch_mode, da_tag):
+    """Save train and test CSVs for a given DA variant."""
+    tag = f"{arch_mode}_{da_tag}" if da_tag else arch_mode
+    tr_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{tag}.csv")
+    te_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{tag}.csv")
+    train_df.to_csv(tr_path, index=False)
+    test_df.to_csv(te_path,  index=False)
+    print(f"  Saved train -> {tr_path}")
+    print(f"  Saved test  -> {te_path}")
+    return tag
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main(arch_mode="autoencoder"):
     os.makedirs(CHECKPOINT_PATH, exist_ok=True)
-    os.makedirs(RESULTS_PATH, exist_ok=True)
+    os.makedirs(RESULTS_PATH,    exist_ok=True)
 
     print("Loading datasets...")
     windows, labels_4cls, binary_labels, metadata = load_data()
@@ -326,49 +509,89 @@ def main(arch_mode="autoencoder"):
     s_train, s_val, s_test = patient_split(metadata, binary_labels)
     s_train, s_val = ensure_validation_domain_coverage(s_train, s_val)
 
-    enc_shared = get_or_train_encoder(
-        task_name="shared", windows=windows, labels_4cls=labels_4cls, metadata=metadata, 
-        s_train=s_train, s_val=s_val, task_filter_fn=lambda m: (m["taskID"] <= 2),
-        input_shape=input_shape, arch_mode=arch_mode
-    )
+    # ── Train / load shared encoder ───────────────────────────────────────────
+    enc = get_or_train_encoder(windows, labels_4cls, metadata,
+                               s_train, s_val, input_shape, arch_mode)
 
+    # ── Extract raw features ──────────────────────────────────────────────────
     s_fit = pd.concat([s_train, s_val]).reset_index(drop=True)
-    print("\nExtracting patient-level features...")
-    X_fit, y_fit, y4_fit, d_fit, s_fit_ids = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_fit, enc_shared)
-    X_test, y_test, y4_test, d_test, s_test_ids = extract_patient_features(windows, binary_labels, labels_4cls, metadata, s_test, enc_shared)
 
-    print(f"Full stance+walking feature vector : {X_fit.shape[1]} dims")
+    print("\nExtracting patient-level features (fit set)...")
+    X_fit,  y_fit,  y4_fit,  d_fit,  s_fit_ids = extract_patient_features(
+        windows, binary_labels, labels_4cls, metadata, s_fit,  enc)
 
-    train_df = pd.DataFrame(X_fit, columns=[f"Feat_{i}" for i in range(X_fit.shape[1])])
-    train_df["y_true"] = y_fit
-    train_df["y_true_4cls"] = y4_fit
-    train_df["dataset"] = d_fit
-    train_df["subjectID"] = s_fit_ids
+    print("Extracting patient-level features (test set)...")
+    X_test, y_test, y4_test, d_test, s_test_ids = extract_patient_features(
+        windows, binary_labels, labels_4cls, metadata, s_test, enc)
 
-    test_df = pd.DataFrame(X_test, columns=[f"Feat_{i}" for i in range(X_test.shape[1])])
-    test_df["y_true"] = y_test
-    test_df["y_true_4cls"] = y4_test
-    test_df["dataset"] = d_test
-    test_df["subjectID"] = s_test_ids
+    n_valid_fit  = (~np.isnan(X_fit).any(axis=1)).sum()
+    n_valid_test = (~np.isnan(X_test).any(axis=1)).sum()
+    print(f"\nFeature dims : {X_fit.shape[1]}")
+    print(f"Fit  patients: {len(X_fit)}  ({n_valid_fit} fully valid)")
+    print(f"Test patients: {len(X_test)} ({n_valid_test} fully valid)")
 
-    train_df, test_df = impute_features(train_df, test_df)
+    # ── Report dataset × task coverage ───────────────────────────────────────
+    feat_cols = [f"Feat_{i}" for i in range(X_fit.shape[1])]
+    tr_df_raw = build_df(X_fit,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
+    te_df_raw = build_df(X_test, y_test, y4_test, d_test, s_test_ids)
 
-    train_out = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{arch_mode}.csv")
-    test_out  = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{arch_mode}.csv")
-    train_df.to_csv(train_out, index=False)
-    test_df.to_csv(test_out, index=False)
-    print(f"Saved -> {train_out}")
-    print(f"Saved -> {test_out}")
-
+    # ── Variant 1: baseline (no DA) ───────────────────────────────────────────
+    print(f"\n{'─'*55}")
+    print(f" Variant: BASELINE (no domain adaptation)")
+    print(f"{'─'*55}")
+    tag_base = save_variant(tr_df_raw, te_df_raw, arch_mode, "baseline")
     try:
-        full_df = pd.concat([train_df, test_df], ignore_index=True)
-        umap_path = make_umap_plot(full_df, RESULTS_PATH, arch_mode)
-        print(f"UMAP saved -> {umap_path}")
+        make_umap_plot(pd.concat([tr_df_raw, te_df_raw], ignore_index=True),
+                       RESULTS_PATH, tag_base)
     except Exception as e:
-        print(f"Warning: failed to create UMAP: {e}")
+        print(f"  [UMAP] {e}")
+
+    # ── Variant 2: CORAL ──────────────────────────────────────────────────────
+    print(f"\n{'─'*55}")
+    print(f" Variant: CORAL (target={TARGET_DOMAIN})")
+    print(f"{'─'*55}")
+    coral_stats = fit_coral(X_fit, d_fit)
+
+    X_fit_coral  = transform_coral(X_fit,  d_fit,  coral_stats)
+    X_test_coral = transform_coral(X_test, d_test, coral_stats)
+
+    tr_df_coral = build_df(X_fit_coral,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
+    te_df_coral = build_df(X_test_coral, y_test, y4_test, d_test, s_test_ids)
+    tag_coral   = save_variant(tr_df_coral, te_df_coral, arch_mode, "coral")
+    try:
+        make_umap_plot(pd.concat([tr_df_coral, te_df_coral], ignore_index=True),
+                       RESULTS_PATH, tag_coral)
+    except Exception as e:
+        print(f"  [UMAP] {e}")
+
+    # ── Variant 3: MMD mean shift ─────────────────────────────────────────────
+    print(f"\n{'─'*55}")
+    print(f" Variant: MMD mean-shift (target={TARGET_DOMAIN})")
+    print(f"{'─'*55}")
+    mmd_stats = fit_mmd_shift(X_fit, d_fit)
+
+    X_fit_mmd  = transform_mmd_shift(X_fit,  d_fit,  mmd_stats)
+    X_test_mmd = transform_mmd_shift(X_test, d_test, mmd_stats)
+
+    tr_df_mmd = build_df(X_fit_mmd,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
+    te_df_mmd = build_df(X_test_mmd, y_test, y4_test, d_test, s_test_ids)
+    tag_mmd   = save_variant(tr_df_mmd, te_df_mmd, arch_mode, "mmd")
+    try:
+        make_umap_plot(pd.concat([tr_df_mmd, te_df_mmd], ignore_index=True),
+                       RESULTS_PATH, tag_mmd)
+    except Exception as e:
+        print(f"  [UMAP] {e}")
+
+    print(f"\n{'═'*55}")
+    print(f" Feature extraction complete for arch_mode={arch_mode}")
+    print(f" Saved variants: baseline, coral, mmd")
+    print(f"{'═'*55}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Feature extraction")
-    parser.add_argument("--arch-mode", choices=["autoencoder", "classifier"], default="autoencoder")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--arch-mode",
+                        choices=["autoencoder", "classifier"],
+                        default="autoencoder")
     args = parser.parse_args()
     main(arch_mode=args.arch_mode)
