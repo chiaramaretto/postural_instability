@@ -24,10 +24,10 @@ OUTPUT_DIR = Path("posturalInstability/cnn_gru/data/")
 # 1. CLEANING AND FILTERING FUNCTIONS
 # =========================================================================
 
-def apply_lowpass(group, sf, cutoff=20.0):
+def apply_bandpass(group, sf, c1 = 0.5, c2 = 20):
     #print(f"  Applying low-pass filter at {cutoff} Hz (sf={sf} Hz)")
     nyq = 0.5 * sf
-    b, a = butter(4, cutoff / nyq, btype="low")
+    b, a = butter(4, [c1/nyq, c2/nyq], btype="band")
     for col in SENSOR_COLS:
         valid_mask = ~group[col].isna()
         if valid_mask.sum() > 30: 
@@ -244,7 +244,7 @@ def main():
             sf = SF_DICT[ds_name]
 
             group = soft_trim_outliers(group, sf)            
-            processed = apply_lowpass(group, sf)
+            processed = apply_bandpass(group, sf)
             resampled = resample_group(processed, sf)
             resampled["label"] = merge_stability_label(label)
             all_processed_data.append(resampled)

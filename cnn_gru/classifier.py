@@ -27,7 +27,7 @@ FEATURE_PREFIX  = "train_features_enriched_"
 def split_lat_hc(X):
     # Stance + walking features concatenated.
     # Latent block: 4 stats * 8 dims * 2 tasks = 64 features
-    lat_block = 2 * (4 * LATENT_DIM)  
+    lat_block = (4 * LATENT_DIM)  
     return X[:, :lat_block], X[:, lat_block:]
 
 def apply_variance_threshold(Xtr, Xte):
@@ -127,7 +127,7 @@ def run_ablation(arch_mode):
     # --- FEATURE SELECTION: RECURSIVE FEATURE ELIMINATION (RFE) ---
     print("\nPerforming Recursive Feature Elimination (RFE) on Combined set...")
     rfe_estimator = RandomForestClassifier(n_estimators=80, max_depth=3, random_state=42, n_jobs=-1)
-    rfe = RFE(estimator=rfe_estimator, n_features_to_select=30, step=5)
+    rfe = RFE(estimator=rfe_estimator, n_features_to_select=15, step=5)
     X_fit_rfe = rfe.fit_transform(X_fit_full_s, y_fit)
     X_test_rfe = rfe.transform(X_test_full_s)
     print(f"RFE selected {X_fit_rfe.shape[1]} features out of {X_fit_full_s.shape[1]}")
