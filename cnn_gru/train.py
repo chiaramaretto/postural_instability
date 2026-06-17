@@ -35,6 +35,10 @@ def train_classifier(model, x_train, y_train, x_val, y_val,
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=20, restore_best_weights=True,
         ),
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=10,
+            min_lr=1e-6, verbose=1,
+        ),
     ]
 
     return model.fit(
@@ -72,10 +76,10 @@ def train_autoencoder(model, x_train, x_val,
             save_best_only=True, save_weights_only=True,
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=15, restore_best_weights=True,
+            monitor="val_loss", patience=20, restore_best_weights=True,
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=7,
+            monitor="val_loss", factor=0.5, patience=10,
             min_lr=1e-6, verbose=1,
         ),
     ]

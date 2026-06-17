@@ -1,21 +1,6 @@
-"""
-domain_classifier.py
-====================
-Evaluates domain separability of the extracted features.
-For each arch_mode, compares three variants:
-  - baseline  (no domain adaptation)
-  - coral     (CORAL alignment toward wearpd)
-  - mmd       (MMD mean-shift toward wearpd)
-
-Outputs:
-  - domain_classifier_results.csv    full per-model results
-  - domain_classifier_comparison.csv baseline vs coral vs mmd delta table
-  - domain_classifier_heatmap.png    accuracy heatmap
-  - domain_classifier_delta.png      delta bar chart
-"""
-
 import os
 import argparse
+import random
 import sys
 
 import matplotlib
@@ -40,9 +25,14 @@ CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 LATENT_DIM      = 8
 LATENT_BLOCK    = 4 * LATENT_DIM   # 32 dims
+RANDOM_STATE    = 42
 
 # DA variants to compare
 DA_VARIANTS = ["baseline", "coral", "mmd"]
+
+def set_seeds(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -50,10 +40,6 @@ DA_VARIANTS = ["baseline", "coral", "mmd"]
 # ══════════════════════════════════════════════════════════════════════════════
 
 def discover_arch_modes(checkpoint_path=CHECKPOINT_PATH):
-    """
-    Find all arch_modes for which baseline, coral and mmd variants exist.
-    Returns list of base arch_mode strings (e.g. ['autoencoder', 'classifier']).
-    """
     arch_modes = set()
     for da in DA_VARIANTS:
         for fname in os.listdir(checkpoint_path):
@@ -80,8 +66,8 @@ def discover_arch_modes(checkpoint_path=CHECKPOINT_PATH):
 # Feature loading & splitting
 # ══════════════════════════════════════════════════════════════════════════════
 
-def load_variant(arch_mode, da_variant, checkpoint_path=CHECKPOINT_PATH):
-    tag = f"{arch_mode}_{da_variant}"
+def load_variant(arch_mode, da_variant, seed=RANDOM_STATE, checkpoint_path=CHECKPOINT_PATH):
+    tag = f"{arch_mode}_{da_variant}_seed{seed}"
     tr  = os.path.join(checkpoint_path, f"train_features_enriched_{tag}.csv")
     te  = os.path.join(checkpoint_path, f"test_features_enriched_{tag}.csv")
     if not os.path.exists(tr) or not os.path.exists(te):
@@ -109,21 +95,21 @@ def get_feature_blocks(df):
 # Models
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_domain_models():
+def get_domain_models(seed=RANDOM_STATE):
     return {
         "RandomForest": RandomForestClassifier(
             n_estimators=200, max_depth=8, min_samples_leaf=2,
-            class_weight="balanced", random_state=42, n_jobs=-1,
+            class_weight="balanced", random_state=seed, n_jobs=-1,
         ),
         "GradientBoosting": GradientBoostingClassifier(
-            n_estimators=120, max_depth=4, random_state=42,
+            n_estimators=120, max_depth=4, random_state=seed,
         ),
         "SVM": SVC(
             kernel="rbf", class_weight="balanced",
-            probability=True, random_state=42,
+            probability=True, random_state=seed,
         ),
         "LogisticRegression": LogisticRegression(
-            class_weight="balanced", max_iter=3000, random_state=42,
+            class_weight="balanced", max_iter=3000, random_state=seed,
         ),
     }
 
@@ -163,14 +149,15 @@ def evaluate_domain(X_train, y_train, X_test, y_test,
     }
 
 
-def run_arch(arch_mode):
-    models  = get_domain_models()
+def run_arch(arch_mode, seed=RANDOM_STATE):
+    set_seeds(seed)
+    models  = get_domain_models(seed=seed)
     records = []
 
     for da_variant in DA_VARIANTS:
         print(f"\n  DA variant: {da_variant.upper()}")
         try:
-            tr_df, te_df = load_variant(arch_mode, da_variant)
+            tr_df, te_df = load_variant(arch_mode, da_variant, seed=seed)
         except FileNotFoundError as e:
             print(f"    [!] {e}")
             continue
@@ -323,27 +310,20 @@ def plot_delta(comp_df, arch_mode):
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main(arch_mode_filter=None):
+def main(arch_mode_filter=None, seed=RANDOM_STATE):
     os.makedirs(RESULTS_PATH, exist_ok=True)
 
-    arch_modes = discover_arch_modes(CHECKPOINT_PATH)
-    if not arch_modes:
-        print("No complete variant sets found. Run feature_extraction.py first.")
-        sys.exit(1)
-
-    if arch_mode_filter:
-        arch_modes = [a for a in arch_modes if a == arch_mode_filter]
-        if not arch_modes:
-            print(f"Arch mode '{arch_mode_filter}' not found. Available: "
-                  f"{discover_arch_modes(CHECKPOINT_PATH)}")
-            sys.exit(1)
+    arch_modes = ["autoencoder", "classifier"] if not arch_mode_filter else [arch_mode_filter]
 
     all_records = []
     for arch in arch_modes:
         print(f"\n{'═'*60}")
-        print(f"  ARCH MODE: {arch.upper()}")
+        print(f"  ARCH MODE: {arch.upper()}  SEED: {seed}")
         print(f"{'═'*60}")
-        all_records.extend(run_arch(arch))
+        try:
+            all_records.extend(run_arch(arch, seed=seed))
+        except FileNotFoundError as e:
+            print(f"  [!] Skipping {arch}: {e}")
 
     if not all_records:
         print("No results produced.")
@@ -353,8 +333,8 @@ def main(arch_mode_filter=None):
     comp_df     = build_comparison(results_df)
 
     # ── Save CSVs ─────────────────────────────────────────────────────────────
-    results_path = os.path.join(RESULTS_PATH, "domain_classifier_results.csv")
-    comp_path    = os.path.join(RESULTS_PATH, "domain_classifier_comparison.csv")
+    results_path = os.path.join(RESULTS_PATH, f"domain_classifier_results_seed{seed}.csv")
+    comp_path    = os.path.join(RESULTS_PATH, f"domain_classifier_comparison_seed{seed}.csv")
     results_df.to_csv(results_path, index=False)
     comp_df.to_csv(comp_path,       index=False)
     print(f"\nResults saved     -> {results_path}")
@@ -394,5 +374,6 @@ if __name__ == "__main__":
         description="Domain classifier: baseline vs CORAL vs MMD")
     parser.add_argument("--arch-mode", default=None,
                         help="Filter to a single arch mode (e.g. 'autoencoder')")
+    parser.add_argument("--seed", type=int, default=RANDOM_STATE)
     args = parser.parse_args()
-    main(arch_mode_filter=args.arch_mode)
+    main(arch_mode_filter=args.arch_mode, seed=args.seed)

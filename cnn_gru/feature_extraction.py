@@ -1,20 +1,7 @@
-"""
-feature_extraction.py
-=====================
-Pipeline:
-  1. Train / load encoder (autoencoder or classifier) on all windows
-  2. Extract 46-dim patient-level features:
-       - 32 latent (mean, std, max, slope of 8-dim latent across all windows)
-       - 8  handcrafted stance (sway area, lateral dominance, p_sway, p_tremor × mean+std)
-       - 6  handcrafted walk   (jerk, step_cv, dom_freq × mean+std)
-  3. Save baseline CSV (no domain adaptation)
-  4. Apply CORAL (wearpd as target) → save _coral CSV
-  5. Apply MMD mean-shift (wearpd as target) → save _mmd CSV
-  6. Generate UMAP plots for each variant
-"""
-
+from model import CnnGru, ImuEncoder
 import argparse
 import os
+import random
 import sys
 
 import matplotlib
@@ -27,7 +14,7 @@ from scipy.linalg import fractional_matrix_power
 from scipy.signal import butter, filtfilt, find_peaks
 from sklearn.model_selection import train_test_split
 
-from model import CnnGru, ImuEncoder
+
 from train import train_autoencoder, train_classifier
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -36,6 +23,12 @@ CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 RANDOM_STATE    = 42
 FS              = 64
+
+def set_seeds(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
 LATENT_DIM      = 8
 TARGET_DOMAIN   = "wearpd"          # CORAL / MMD target
 CORAL_REG       = 1e-2              # regularisation for CORAL covariance
@@ -58,7 +51,7 @@ def _lazy_umap():
             raise ImportError("Install umap-learn to generate UMAP plots.")
 
 
-def make_umap_plot(df, output_dir, mode_tag):
+def make_umap_plot(df, output_dir, mode_tag, seed=RANDOM_STATE):
     try:
         umap = _lazy_umap()
     except ImportError as e:
@@ -74,7 +67,7 @@ def make_umap_plot(df, output_dir, mode_tag):
         print("  [UMAP skipped] too few valid rows.")
         return None
 
-    embedding = umap.UMAP(n_components=2, random_state=RANDOM_STATE).fit_transform(
+    embedding = umap.UMAP(n_components=2, random_state=seed).fit_transform(
         df_v[lat_cols].to_numpy(dtype=np.float32))
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -121,7 +114,7 @@ def subject_mask(metadata, subjects_df):
     return meta_idx.isin(subj_idx)
 
 
-def patient_split(metadata, binary_labels):
+def patient_split(metadata, binary_labels, seed=RANDOM_STATE):
     subjects = metadata[["dataset", "subjectID"]].drop_duplicates().copy()
     subj_bin = []
     for _, s in subjects.iterrows():
@@ -135,22 +128,22 @@ def patient_split(metadata, binary_labels):
         if len(cls) < 3:
             train_list.append(cls)
             continue
-        s_trval, s_test = train_test_split(cls, test_size=0.25, random_state=RANDOM_STATE)
-        s_tr, s_val     = train_test_split(s_trval, test_size=0.2, random_state=RANDOM_STATE)
+        s_trval, s_test = train_test_split(cls, test_size=0.25, random_state=seed)
+        s_tr, s_val     = train_test_split(s_trval, test_size=0.2, random_state=seed)
         train_list.append(s_tr)
         val_list.append(s_val)
         test_list.append(s_test)
 
-    s_train = pd.concat(train_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
-    s_val   = pd.concat(val_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
-    s_test  = pd.concat(test_list).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+    s_train = pd.concat(train_list).sample(frac=1, random_state=seed).reset_index(drop=True)
+    s_val   = pd.concat(val_list).sample(frac=1, random_state=seed).reset_index(drop=True)
+    s_test  = pd.concat(test_list).sample(frac=1, random_state=seed).reset_index(drop=True)
     for df in (s_train, s_val, s_test):
         df.drop(columns=["bin_label"], inplace=True)
     print(f"\nSplit — train: {len(s_train)}, val: {len(s_val)}, test: {len(s_test)} patients")
     return s_train, s_val, s_test
 
 
-def ensure_validation_domain_coverage(s_train, s_val):
+def ensure_validation_domain_coverage(s_train, s_val, seed=RANDOM_STATE):
     missing = [ds for ds in pd.unique(s_train["dataset"])
                if ds not in set(pd.unique(s_val["dataset"]))]
     if not missing:
@@ -165,8 +158,8 @@ def ensure_validation_domain_coverage(s_train, s_val):
         s_train = s_train.drop(index=row.index)
         moved.append(row)
     if moved:
-        s_val   = pd.concat([s_val] + moved, ignore_index=True).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
-        s_train = s_train.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+        s_val   = pd.concat([s_val] + moved, ignore_index=True).sample(frac=1, random_state=seed).reset_index(drop=True)
+        s_train = s_train.sample(frac=1, random_state=seed).reset_index(drop=True)
     return s_train, s_val
 
 
@@ -280,12 +273,12 @@ def extract_patient_features(windows, binary_labels, labels_4cls,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_or_train_encoder(windows, labels_4cls, metadata,
-                         s_train, s_val, input_shape, arch_mode):
+                         s_train, s_val, input_shape, arch_mode, seed=RANDOM_STATE):
     train_mask = subject_mask(metadata, s_train) & (metadata["taskID"] <= 2)
     val_mask   = subject_mask(metadata, s_val)   & (metadata["taskID"] <= 2)
     x_train, x_val = windows[train_mask], windows[val_mask]
 
-    weights_fn = f"best_{arch_mode}_shared.weights.h5"
+    weights_fn = f"best_{arch_mode}_shared_seed{seed}.weights.h5"
     full_path  = os.path.join(CHECKPOINT_PATH, weights_fn)
 
     if arch_mode == "autoencoder":
@@ -323,11 +316,6 @@ def get_or_train_encoder(windows, labels_4cls, metadata,
 
 def fit_coral(X_fit, domains_fit, target_domain=TARGET_DOMAIN,
               reg=CORAL_REG, min_samples=MIN_CORAL_SAMPLES):
-    """
-    Fit CORAL parameters on the training set only.
-    Target = wearpd. Sources = all other domains.
-    Returns a stats dict to be passed to transform_coral.
-    """
     valid = ~np.isnan(X_fit).any(axis=1)
     n_feat = X_fit.shape[1]
 
@@ -383,11 +371,7 @@ def fit_coral(X_fit, domains_fit, target_domain=TARGET_DOMAIN,
 
 
 def transform_coral(X, domains, stats):
-    """
-    Apply CORAL transform fitted by fit_coral.
-    Target domain (wearpd) is left unchanged.
-    Works on any split (train, val, test).
-    """
+
     if not stats:
         return np.copy(X)
 
@@ -451,11 +435,7 @@ def fit_mmd_shift(X_fit, domains_fit, target_domain=TARGET_DOMAIN,
 
 
 def transform_mmd_shift(X, domains, stats):
-    """
-    Apply MMD mean-shift fitted by fit_mmd_shift.
-    Target domain left unchanged.
-    Works on any split.
-    """
+
     if not stats:
         return np.copy(X)
 
@@ -482,9 +462,8 @@ def build_df(X, y, y4, dsets, sids):
     return df
 
 
-def save_variant(train_df, test_df, arch_mode, da_tag):
-    """Save train and test CSVs for a given DA variant."""
-    tag = f"{arch_mode}_{da_tag}" if da_tag else arch_mode
+def save_variant(train_df, test_df, arch_mode, da_tag, seed=RANDOM_STATE):
+    tag = f"{arch_mode}_{da_tag}_seed{seed}" if da_tag else f"{arch_mode}_seed{seed}"
     tr_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{tag}.csv")
     te_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{tag}.csv")
     train_df.to_csv(tr_path, index=False)
@@ -498,20 +477,22 @@ def save_variant(train_df, test_df, arch_mode, da_tag):
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main(arch_mode="autoencoder"):
+def main(arch_mode="autoencoder", seed=RANDOM_STATE):
+    set_seeds(seed)
     os.makedirs(CHECKPOINT_PATH, exist_ok=True)
     os.makedirs(RESULTS_PATH,    exist_ok=True)
 
+    print(f"Seed: {seed}")
     print("Loading datasets...")
     windows, labels_4cls, binary_labels, metadata = load_data()
     input_shape = windows.shape[1:]
 
-    s_train, s_val, s_test = patient_split(metadata, binary_labels)
-    s_train, s_val = ensure_validation_domain_coverage(s_train, s_val)
+    s_train, s_val, s_test = patient_split(metadata, binary_labels, seed=seed)
+    s_train, s_val = ensure_validation_domain_coverage(s_train, s_val, seed=seed)
 
     # ── Train / load shared encoder ───────────────────────────────────────────
     enc = get_or_train_encoder(windows, labels_4cls, metadata,
-                               s_train, s_val, input_shape, arch_mode)
+                               s_train, s_val, input_shape, arch_mode, seed=seed)
 
     # ── Extract raw features ──────────────────────────────────────────────────
     s_fit = pd.concat([s_train, s_val]).reset_index(drop=True)
@@ -530,8 +511,6 @@ def main(arch_mode="autoencoder"):
     print(f"Fit  patients: {len(X_fit)}  ({n_valid_fit} fully valid)")
     print(f"Test patients: {len(X_test)} ({n_valid_test} fully valid)")
 
-    # ── Report dataset × task coverage ───────────────────────────────────────
-    feat_cols = [f"Feat_{i}" for i in range(X_fit.shape[1])]
     tr_df_raw = build_df(X_fit,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
     te_df_raw = build_df(X_test, y_test, y4_test, d_test, s_test_ids)
 
@@ -539,10 +518,10 @@ def main(arch_mode="autoencoder"):
     print(f"\n{'─'*55}")
     print(f" Variant: BASELINE (no domain adaptation)")
     print(f"{'─'*55}")
-    tag_base = save_variant(tr_df_raw, te_df_raw, arch_mode, "baseline")
+    tag_base = save_variant(tr_df_raw, te_df_raw, arch_mode, "baseline", seed=seed)
     try:
         make_umap_plot(pd.concat([tr_df_raw, te_df_raw], ignore_index=True),
-                       RESULTS_PATH, tag_base)
+                       RESULTS_PATH, tag_base, seed=seed)
     except Exception as e:
         print(f"  [UMAP] {e}")
 
@@ -557,10 +536,10 @@ def main(arch_mode="autoencoder"):
 
     tr_df_coral = build_df(X_fit_coral,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
     te_df_coral = build_df(X_test_coral, y_test, y4_test, d_test, s_test_ids)
-    tag_coral   = save_variant(tr_df_coral, te_df_coral, arch_mode, "coral")
+    tag_coral   = save_variant(tr_df_coral, te_df_coral, arch_mode, "coral", seed=seed)
     try:
         make_umap_plot(pd.concat([tr_df_coral, te_df_coral], ignore_index=True),
-                       RESULTS_PATH, tag_coral)
+                       RESULTS_PATH, tag_coral, seed=seed)
     except Exception as e:
         print(f"  [UMAP] {e}")
 
@@ -575,15 +554,15 @@ def main(arch_mode="autoencoder"):
 
     tr_df_mmd = build_df(X_fit_mmd,  y_fit,  y4_fit,  d_fit,  s_fit_ids)
     te_df_mmd = build_df(X_test_mmd, y_test, y4_test, d_test, s_test_ids)
-    tag_mmd   = save_variant(tr_df_mmd, te_df_mmd, arch_mode, "mmd")
+    tag_mmd   = save_variant(tr_df_mmd, te_df_mmd, arch_mode, "mmd", seed=seed)
     try:
         make_umap_plot(pd.concat([tr_df_mmd, te_df_mmd], ignore_index=True),
-                       RESULTS_PATH, tag_mmd)
+                       RESULTS_PATH, tag_mmd, seed=seed)
     except Exception as e:
         print(f"  [UMAP] {e}")
 
     print(f"\n{'═'*55}")
-    print(f" Feature extraction complete for arch_mode={arch_mode}")
+    print(f" Feature extraction complete for arch_mode={arch_mode}, seed={seed}")
     print(f" Saved variants: baseline, coral, mmd")
     print(f"{'═'*55}")
 
@@ -593,5 +572,6 @@ if __name__ == "__main__":
     parser.add_argument("--arch-mode",
                         choices=["autoencoder", "classifier"],
                         default="autoencoder")
+    parser.add_argument("--seed", type=int, default=RANDOM_STATE)
     args = parser.parse_args()
-    main(arch_mode=args.arch_mode)
+    main(arch_mode=args.arch_mode, seed=args.seed)

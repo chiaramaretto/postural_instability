@@ -1,5 +1,6 @@
 import os
 import argparse
+import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -19,6 +20,11 @@ CHECKPOINT_PATH = "posturalInstability/cnn_gru/models/"
 RESULTS_PATH    = "posturalInstability/cnn_gru/results/"
 LATENT_DIM      = 8
 FEATURE_PREFIX  = "train_features_enriched_"
+RANDOM_STATE    = 42
+
+def set_seeds(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
 
 # ═════════════════════════════════════════════
 # 1. SETUP & CLASSIFIER DICTIONARY
@@ -40,20 +46,20 @@ def apply_z_scaling(Xtr, Xte):
     Xte_s = scaler.transform(Xte)
     return Xtr_s, Xte_s
 
-def get_classifiers():
+def get_classifiers(seed=RANDOM_STATE):
     return {
         "RandomForest": RandomForestClassifier(
-            n_estimators=50, max_depth=3, min_samples_leaf=3, 
-            class_weight="balanced", random_state=42, n_jobs=-1
+            n_estimators=50, max_depth=3, min_samples_leaf=3,
+            class_weight="balanced", random_state=seed, n_jobs=-1
         ),
         "GradientBoosting": GradientBoostingClassifier(
-            n_estimators=50, max_depth=3, random_state=42
+            n_estimators=50, max_depth=3, random_state=seed, class_weight='balanced'
         ),
         "SVM": SVC(
-            kernel='rbf', probability=True, class_weight='balanced', random_state=42
+            kernel='rbf', probability=True, class_weight='balanced', random_state=seed
         ),
         "LogisticRegression": LogisticRegression(
-            class_weight='balanced', max_iter=2000, random_state=42
+            class_weight='balanced', max_iter=2000, random_state=seed
         )
     }
 
@@ -84,14 +90,15 @@ def binary_confusion_stats(y_true, y_pred):
 # 2. EVALUATION PIPELINE
 # ═════════════════════════════════════════════
 
-def run_ablation(arch_mode):
-
+def run_ablation(arch_mode, seed=RANDOM_STATE):
+    set_seeds(seed)
     suffix = ["baseline", "coral", "mmd"]
     for s in suffix:
-        train_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{arch_mode}_{s}.csv")
-        test_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{arch_mode}_{s}.csv")
+        train_path = os.path.join(CHECKPOINT_PATH, f"train_features_enriched_{arch_mode}_{s}_seed{seed}.csv")
+        test_path = os.path.join(CHECKPOINT_PATH, f"test_features_enriched_{arch_mode}_{s}_seed{seed}.csv")
 
         if not os.path.exists(train_path) or not os.path.exists(test_path):
+            print(train_path, test_path)
             raise FileNotFoundError(f"File mancanti per la modalità: '{arch_mode}'")
 
         print(f"Loading enriched features from disk ({arch_mode})...")
@@ -127,7 +134,7 @@ def run_ablation(arch_mode):
 
         # --- FEATURE SELECTION: RECURSIVE FEATURE ELIMINATION (RFE) ---
         print("\nPerforming Recursive Feature Elimination (RFE) on Combined set...")
-        rfe_estimator = RandomForestClassifier(n_estimators=80, max_depth=3, random_state=42, n_jobs=-1)
+        rfe_estimator = RandomForestClassifier(n_estimators=80, max_depth=3, random_state=seed, n_jobs=-1)
         rfe = RFE(estimator=rfe_estimator, n_features_to_select=15, step=5)
         X_fit_rfe = rfe.fit_transform(X_fit_full_s, y_fit)
         X_test_rfe = rfe.transform(X_test_full_s)
@@ -140,7 +147,7 @@ def run_ablation(arch_mode):
             "Combined_RFE": (X_fit_rfe, X_test_rfe)
         }
 
-        classifiers = get_classifiers()
+        classifiers = get_classifiers(seed=seed)
         
         # Trackers for saving
         summary_results = []
@@ -209,9 +216,9 @@ def run_ablation(arch_mode):
         print("═" * 60)
         print(summary_df.to_string(index=False))
 
-        summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_{arch_mode}_{s}.csv")
-        dataset_summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_by_dataset_{arch_mode}_{s}.csv")
-        preds_path = os.path.join(RESULTS_PATH, f"double_ablation_predictions_{arch_mode}_{s}.xlsx")
+        summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_{arch_mode}_{s}_seed{seed}.csv")
+        dataset_summary_path = os.path.join(RESULTS_PATH, f"double_ablation_metrics_by_dataset_{arch_mode}_{s}_seed{seed}.csv")
+        preds_path = os.path.join(RESULTS_PATH, f"double_ablation_predictions_{arch_mode}_{s}_seed{seed}.xlsx")
 
         summary_df.to_csv(summary_path, index=False)
         dataset_df.to_csv(dataset_summary_path, index=False)
@@ -224,15 +231,9 @@ def run_ablation(arch_mode):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run classifier ablation on enriched features")
-    parser.add_argument("--arch-mode", default="auto", help="Feature mode to load, or 'auto' to discover automatically.")
+    parser.add_argument("--arch-mode", default="autoencoder")
+    parser.add_argument("--seed", type=int, default=RANDOM_STATE)
     args = parser.parse_args()
 
     os.makedirs(RESULTS_PATH, exist_ok=True)
-
-    if args.arch_mode == "auto":
-        print("Auto-discovering feature mode...")
-        target_mode = discover_feature_mode(CHECKPOINT_PATH)
-    else:
-        target_mode = args.arch_mode
-
-    run_ablation(target_mode)
+    run_ablation(args.arch_mode, seed=args.seed)

@@ -64,7 +64,7 @@ class ImuEncoder(tf.keras.Model):
         self.mask_prob   = mask_prob
         self.seq_len     = input_shape[0]          # 640
         self.n_channels  = input_shape[1]          # 6
-        self.compressed  = self.seq_len // 4       # 160 (two strides of 2)
+        self.compressed  = self.seq_len
 
         # ── Encoder ────────────────────────────────────────────────────
         self.conv1 = Conv1D(16, kernel_size=5, strides=1, activation="relu", padding="same")
@@ -82,9 +82,9 @@ class ImuEncoder(tf.keras.Model):
         # ── Decoder ────────────────────────────────────────────────────
         self.dec_dense  = Dense(self.compressed * 32, activation="relu")
         self.dec_reshape = Reshape((self.compressed, 32))
-        self.deconv1    = Conv1DTranspose(32, kernel_size=3, strides=2,
+        self.deconv1    = Conv1DTranspose(32, kernel_size=3, strides=1,
                                           activation="relu", padding="same")
-        self.deconv2    = Conv1DTranspose(16, kernel_size=3, strides=2,
+        self.deconv2    = Conv1DTranspose(16, kernel_size=5, strides=1,
                                           activation="relu", padding="same")
         self.out_layer  = Conv1D(self.n_channels, kernel_size=3,
                                  activation="linear", padding="same",
