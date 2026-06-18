@@ -1,8 +1,8 @@
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from sklearn.utils import class_weight
-import tensorflow as tf
 from itertools import combinations
 
 
@@ -41,7 +41,7 @@ def train_classifier(model, x_train, y_train, x_val, y_val,
         ),
     ]
 
-    return model.fit(
+    history = model.fit(
         x_train, y_train,
         validation_data=(x_val, y_val),
         epochs=100,
@@ -50,6 +50,36 @@ def train_classifier(model, x_train, y_train, x_val, y_val,
         callbacks=callbacks,
         verbose=1,
     )
+    plot_classifier_history(history, checkpoint_path)
+    return history
+
+
+def plot_classifier_history(history, save_dir):
+    acc     = history.history["accuracy"]
+    val_acc = history.history["val_accuracy"]
+    loss    = history.history["loss"]
+    val_loss= history.history["val_loss"]
+    epochs  = range(1, len(acc) + 1)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    ax1.plot(epochs, acc,     label="Train")
+    ax1.plot(epochs, val_acc, label="Val")
+    ax1.set_title("Accuracy")
+    ax1.set_xlabel("Epoch")
+    ax1.legend()
+
+    ax2.plot(epochs, loss,     label="Train")
+    ax2.plot(epochs, val_loss, label="Val")
+    ax2.set_title("Loss")
+    ax2.set_xlabel("Epoch")
+    ax2.legend()
+
+    plt.tight_layout()
+    out_path = os.path.join(save_dir, "classifier_history.png")
+    plt.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"Training history saved to {out_path}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

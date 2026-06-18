@@ -53,7 +53,7 @@ def get_classifiers(seed=RANDOM_STATE):
             class_weight="balanced", random_state=seed, n_jobs=-1
         ),
         "GradientBoosting": GradientBoostingClassifier(
-            n_estimators=50, max_depth=3, random_state=seed, class_weight='balanced'
+            n_estimators=50, max_depth=3, random_state=seed
         ),
         "SVM": SVC(
             kernel='rbf', probability=True, class_weight='balanced', random_state=seed
