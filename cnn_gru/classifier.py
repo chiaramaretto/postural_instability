@@ -38,7 +38,51 @@ def apply_variance_threshold(Xtr, Xte):
     v = VarianceThreshold(threshold=1e-6)
     Xtr_f = v.fit_transform(Xtr)
     Xte_f = v.transform(Xte)
-    return Xtr_f, Xte_f
+    return Xtr_f, Xte_f, v
+
+
+def save_rfe_report(rfe, vt_selector, all_feature_names, save_path):
+    """Save a ranked CSV and importance bar chart for the features selected by RFE."""
+    vt_mask = vt_selector.get_support()
+    surviving_names = [n for n, kept in zip(all_feature_names, vt_mask) if kept]
+
+    # Full ranking table for all features that survived variance threshold
+    records = [
+        {
+            "feature_name": name,
+            "type": "Latent" if name.startswith("Lat_") else "HC",
+            "rfe_rank": int(rfe.ranking_[i]),   # 1 = selected
+            "rfe_selected": bool(rfe.support_[i]),
+        }
+        for i, name in enumerate(surviving_names)
+    ]
+    report_df = pd.DataFrame(records).sort_values("rfe_rank")
+    report_df.to_csv(save_path, index=False)
+    print(f"RFE report saved → {save_path}")
+
+    # Bar chart: selected features sorted by RF importance
+    sel_names = [r["feature_name"] for r in records if r["rfe_selected"]]
+    importances = rfe.estimator_.feature_importances_   # length == n_selected
+    order = np.argsort(importances)[::-1]
+    sel_names_sorted = [sel_names[i] for i in order]
+    imp_sorted = importances[order]
+    colors = ["steelblue" if n.startswith("Lat_") else "salmon" for n in sel_names_sorted]
+
+    from matplotlib.patches import Patch
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.bar(range(len(sel_names_sorted)), imp_sorted, color=colors)
+    ax.set_xticks(range(len(sel_names_sorted)))
+    ax.set_xticklabels(sel_names_sorted, rotation=45, ha="right")
+    ax.set_title("RFE Selected Features — RF Importance")
+    ax.set_ylabel("Importance")
+    ax.legend(handles=[Patch(color="steelblue", label="Latent"),
+                       Patch(color="salmon",    label="Handcrafted")])
+    plt.tight_layout()
+
+    plot_path = save_path.replace(".csv", ".png")
+    plt.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    print(f"RFE plot saved → {plot_path}")
 
 def apply_z_scaling(Xtr, Xte):
     scaler = StandardScaler()
@@ -122,10 +166,18 @@ def run_ablation(arch_mode, seed=RANDOM_STATE):
         X_fit_lat,  X_fit_hc  = split_lat_hc(X_fit)
         X_test_lat, X_test_hc = split_lat_hc(X_test)
 
+        # Build semantic feature names from known structure (Latent block first, then HC)
+        lat_block = 4 * LATENT_DIM
+        n_total = X_fit.shape[1]
+        all_feature_names = (
+            [f"Lat_{i}" for i in range(min(lat_block, n_total))] +
+            [f"HC_{i}"  for i in range(max(0, n_total - lat_block))]
+        )
+
         # Filter zero-variance features
-        X_fit_lat_f,  X_test_lat_f  = apply_variance_threshold(X_fit_lat,  X_test_lat)
-        X_fit_hc_f,   X_test_hc_f   = apply_variance_threshold(X_fit_hc,   X_test_hc)
-        X_fit_full_f, X_test_full_f = apply_variance_threshold(X_fit,   X_test)
+        X_fit_lat_f,  X_test_lat_f,  _       = apply_variance_threshold(X_fit_lat, X_test_lat)
+        X_fit_hc_f,   X_test_hc_f,   _       = apply_variance_threshold(X_fit_hc,  X_test_hc)
+        X_fit_full_f, X_test_full_f, vt_full = apply_variance_threshold(X_fit,     X_test)
 
         # Z-score scaling fitted on train only and then applied to test
         X_fit_lat_s,  X_test_lat_s  = apply_z_scaling(X_fit_lat_f,  X_test_lat_f)
@@ -139,6 +191,9 @@ def run_ablation(arch_mode, seed=RANDOM_STATE):
         X_fit_rfe = rfe.fit_transform(X_fit_full_s, y_fit)
         X_test_rfe = rfe.transform(X_test_full_s)
         print(f"RFE selected {X_fit_rfe.shape[1]} features out of {X_fit_full_s.shape[1]}")
+
+        rfe_report_path = os.path.join(RESULTS_PATH, f"rfe_features_{arch_mode}_{s}_seed{seed}.csv")
+        save_rfe_report(rfe, vt_full, all_feature_names, rfe_report_path)
 
         feature_sets = {
             "Handcrafted":  (X_fit_hc_s, X_test_hc_s),
