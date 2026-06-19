@@ -7,6 +7,7 @@ import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -89,6 +90,110 @@ def make_umap_plot(df, output_dir, mode_tag, seed=RANDOM_STATE):
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  UMAP saved -> {out}")
+    return out
+
+
+_THESIS_STYLE = {
+    "font.family":           "sans-serif",
+    "font.size":             18,
+    "axes.titlesize":        18,
+    "axes.titleweight":      "bold",
+    "axes.labelsize":        18,
+    "xtick.labelsize":       18,
+    "ytick.labelsize":       18,
+    "legend.fontsize":       18,
+    "legend.title_fontsize": 18,
+    "legend.framealpha":     0.85,
+    "axes.spines.top":       False,
+    "axes.spines.right":     False,
+    "figure.dpi":            120,
+    "savefig.dpi":           300,
+    "savefig.bbox":          "tight",
+}
+
+# Wong colorblind-safe palette (7 colours)
+_WONG = ["#0072B2", "#D55E00", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#F0E442"]
+
+
+def make_umap_combined(dfs_by_variant, output_dir, arch_mode, seed=RANDOM_STATE):
+    """
+    Single 1×3 figure: UMAP latent space coloured by dataset for
+    baseline / CORAL / MMD side by side.
+
+    dfs_by_variant: dict {"baseline": df, "coral": df, "mmd": df}
+                    each df is train+test concatenated.
+    """
+    try:
+        umap_lib = _lazy_umap()
+    except ImportError as e:
+        print(f"  [UMAP combined] {e}")
+        return None
+
+    plt.rcParams.update(_THESIS_STYLE)
+
+    variant_titles = {"baseline": "Baseline", "coral": "CORAL", "mmd": "MMD"}
+
+    # Consistent dataset colours across all panels
+    all_datasets = sorted({
+        ds
+        for df in dfs_by_variant.values() if df is not None
+        for ds in pd.unique(df["dataset"])
+    })
+    ds_colors = {ds: _WONG[i % len(_WONG)] for i, ds in enumerate(all_datasets)}
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    for ax, variant in zip(axes, ["baseline", "coral", "mmd"]):
+        df = dfs_by_variant.get(variant)
+        ax.set_title(variant_titles[variant])
+        ax.grid(True, alpha=0.35, linestyle="--", zorder=0)
+        ax.set_xlabel("UMAP 1")
+        ax.set_ylabel("UMAP 2")
+        ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+        if df is None:
+            ax.text(0.5, 0.5, "N/A", transform=ax.transAxes,
+                    ha="center", va="center")
+            continue
+
+        feat_cols = [c for c in df.columns if c.startswith("Feat_")]
+        lat_cols  = feat_cols[: 4 * LATENT_DIM]
+        df_v = df[df[lat_cols].notna().all(axis=1)]
+
+        if len(df_v) < 5:
+            ax.text(0.5, 0.5, "Too few samples", transform=ax.transAxes,
+                    ha="center", va="center")
+            continue
+
+        embedding = umap_lib.UMAP(n_components=2, random_state=seed).fit_transform(
+            df_v[lat_cols].to_numpy(dtype=np.float32)
+        )
+
+        for ds in all_datasets:
+            m = df_v["dataset"].values == ds
+            if m.sum() == 0:
+                continue
+            ax.scatter(embedding[m, 0], embedding[m, 1],
+                       c=ds_colors[ds], label=ds,
+                       alpha=0.75, s=50, linewidths=0, zorder=3)
+
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor=ds_colors[ds], markersize=12, label=ds)
+        for ds in all_datasets
+    ]
+    fig.legend(handles=legend_handles, title="Dataset",
+               loc="lower center", ncol=len(all_datasets),
+               bbox_to_anchor=(0.5, -0.08), framealpha=0.85)
+
+    fig.suptitle(f"UMAP – Latent Space by Dataset  [{arch_mode}]",
+                 fontsize=18, fontweight="bold", y=1.02)
+    fig.tight_layout()
+
+    out = os.path.join(output_dir, f"umap_combined_{arch_mode}_seed{seed}.png")
+    fig.savefig(out, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Combined UMAP saved → {out}")
     return out
 
 
@@ -560,6 +665,19 @@ def main(arch_mode="autoencoder", seed=RANDOM_STATE):
                        RESULTS_PATH, tag_mmd, seed=seed)
     except Exception as e:
         print(f"  [UMAP] {e}")
+
+    # ── Combined UMAP (all three variants, one figure) ───────────────────────
+    try:
+        make_umap_combined(
+            {
+                "baseline": pd.concat([tr_df_raw,   te_df_raw],   ignore_index=True),
+                "coral":    pd.concat([tr_df_coral,  te_df_coral], ignore_index=True),
+                "mmd":      pd.concat([tr_df_mmd,    te_df_mmd],   ignore_index=True),
+            },
+            RESULTS_PATH, arch_mode, seed=seed,
+        )
+    except Exception as e:
+        print(f"  [UMAP combined] {e}")
 
     print(f"\n{'═'*55}")
     print(f" Feature extraction complete for arch_mode={arch_mode}, seed={seed}")
