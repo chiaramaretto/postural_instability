@@ -68,17 +68,15 @@ def plot_classifier_history(history, save_dir):
     ax1.set_title("Accuracy", fontsize=16)
     ax1.set_xlabel("Epoch", fontsize=14)
     ax1.set_ylabel("Accuracy", fontsize=14)
-    ax1.set_xticks(fontsize=14)
-    ax1.set_yticks(fontsize=14)
-    ax1.legend()
+    ax1.tick_params(axis='both', labelsize=14)
+    ax1.legend(fontsize=14)
 
     ax2.plot(epochs, loss,     label="Train")
     ax2.plot(epochs, val_loss, label="Val")
     ax2.set_title("Loss", fontsize=16)
     ax2.set_xlabel("Epoch", fontsize=14)
     ax2.set_ylabel("Loss", fontsize=14)
-    ax2.set_xticks(fontsize=14)
-    ax2.set_yticks(fontsize=14)
+    ax2.tick_params(axis='both', labelsize=14)
     ax2.legend(fontsize=14)
 
     plt.tight_layout()
@@ -86,7 +84,6 @@ def plot_classifier_history(history, save_dir):
     plt.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Training history saved to {out_path}")
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AUTOENCODER TRAINING (self-supervised reconstruction)
