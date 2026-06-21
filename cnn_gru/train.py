@@ -61,19 +61,25 @@ def plot_classifier_history(history, save_dir):
     val_loss= history.history["val_loss"]
     epochs  = range(1, len(acc) + 1)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     ax1.plot(epochs, acc,     label="Train")
     ax1.plot(epochs, val_acc, label="Val")
-    ax1.set_title("Accuracy")
-    ax1.set_xlabel("Epoch")
+    ax1.set_title("Accuracy", fontsize=16)
+    ax1.set_xlabel("Epoch", fontsize=14)
+    ax1.set_ylabel("Accuracy", fontsize=14)
+    ax1.set_xticks(fontsize=14)
+    ax1.set_yticks(fontsize=14)
     ax1.legend()
 
     ax2.plot(epochs, loss,     label="Train")
     ax2.plot(epochs, val_loss, label="Val")
-    ax2.set_title("Loss")
-    ax2.set_xlabel("Epoch")
-    ax2.legend()
+    ax2.set_title("Loss", fontsize=16)
+    ax2.set_xlabel("Epoch", fontsize=14)
+    ax2.set_ylabel("Loss", fontsize=14)
+    ax2.set_xticks(fontsize=14)
+    ax2.set_yticks(fontsize=14)
+    ax2.legend(fontsize=14)
 
     plt.tight_layout()
     out_path = os.path.join(save_dir, "classifier_history.png")

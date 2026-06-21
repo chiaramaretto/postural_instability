@@ -76,16 +76,19 @@ def make_umap_plot(df, output_dir, mode_tag, seed=RANDOM_STATE):
         m = df_v["dataset"] == ds
         axes[0].scatter(embedding[m, 0], embedding[m, 1], label=ds, alpha=0.65, s=35, fontsize=15)
     axes[0].set_title("Latent space by dataset", fontsize=18)
-    axes[0].legend(fontsize=13)
+    axes[0].legend(fontsize=13, loc="upper left", bbox_to_anchor=(0, -0.12),
+               ncol=2, borderaxespad=0)
+
 
     for lbl, col, name in [(0, "steelblue", "HC"), (1, "tomato", "PD")]:
         m = df_v["y_true"] == lbl
         axes[1].scatter(embedding[m, 0], embedding[m, 1], c=col, label=name, alpha=0.65, s=35, fontsize=15)
     axes[1].set_title("Latent space by class", fontsize=18)
-    axes[1].legend(fontsize=13)
+    axes[1].legend(fontsize=13, loc="upper left", bbox_to_anchor=(0, -0.12),
+               ncol=2, borderaxespad=0)
 
     fig.suptitle(f"UMAP — {mode_tag}", y=1.02, fontsize=18)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.08, 1, 1])  # lascia spazio in basso per le legende
     out = os.path.join(output_dir, f"umap_latent_{mode_tag}.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -141,14 +144,14 @@ def make_umap_combined(dfs_by_variant, output_dir, arch_mode, seed=RANDOM_STATE)
     })
     ds_colors = {ds: _WONG[i % len(_WONG)] for i, ds in enumerate(all_datasets)}
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 5))
 
     for ax, variant in zip(axes, ["baseline", "coral", "mmd"]):
         df = dfs_by_variant.get(variant)
         ax.set_title(variant_titles[variant])
         ax.grid(True, alpha=0.35, linestyle="--", zorder=0)
-        ax.set_xlabel("UMAP 1")
-        ax.set_ylabel("UMAP 2")
+        ax.set_xlabel("UMAP 1", fontsize=16)
+        ax.set_ylabel("UMAP 2", fontsize=16)
         ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
         if df is None:
@@ -184,7 +187,7 @@ def make_umap_combined(dfs_by_variant, output_dir, arch_mode, seed=RANDOM_STATE)
     ]
     fig.legend(handles=legend_handles, title="Dataset",
                loc="lower center", ncol=len(all_datasets),
-               bbox_to_anchor=(0.5, -0.08), framealpha=0.85)
+               bbox_to_anchor=(0.5, -0.15), framealpha=0.85, fontsize=16, title_fontsize=16)
 
     fig.suptitle(f"UMAP – Latent Space by Dataset  [{arch_mode}]",
                  fontsize=18, fontweight="bold", y=1.02)
