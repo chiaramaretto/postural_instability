@@ -71,20 +71,20 @@ def make_umap_plot(df, output_dir, mode_tag, seed=RANDOM_STATE):
     embedding = umap.UMAP(n_components=2, random_state=seed).fit_transform(
         df_v[lat_cols].to_numpy(dtype=np.float32))
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     for ds in pd.unique(df_v["dataset"]):
         m = df_v["dataset"] == ds
-        axes[0].scatter(embedding[m, 0], embedding[m, 1], label=ds, alpha=0.65, s=35)
-    axes[0].set_title("Latent space by dataset")
-    axes[0].legend(fontsize=8)
+        axes[0].scatter(embedding[m, 0], embedding[m, 1], label=ds, alpha=0.65, s=35, fontsize=15)
+    axes[0].set_title("Latent space by dataset", fontsize=18)
+    axes[0].legend(fontsize=13)
 
     for lbl, col, name in [(0, "steelblue", "HC"), (1, "tomato", "PD")]:
         m = df_v["y_true"] == lbl
-        axes[1].scatter(embedding[m, 0], embedding[m, 1], c=col, label=name, alpha=0.65, s=35)
-    axes[1].set_title("Latent space by class")
-    axes[1].legend()
+        axes[1].scatter(embedding[m, 0], embedding[m, 1], c=col, label=name, alpha=0.65, s=35, fontsize=15)
+    axes[1].set_title("Latent space by class", fontsize=18)
+    axes[1].legend(fontsize=13)
 
-    fig.suptitle(f"UMAP — {mode_tag}", y=1.02)
+    fig.suptitle(f"UMAP — {mode_tag}", y=1.02, fontsize=18)
     fig.tight_layout()
     out = os.path.join(output_dir, f"umap_latent_{mode_tag}.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")

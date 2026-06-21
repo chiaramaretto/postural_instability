@@ -265,7 +265,7 @@ def plot_preprocessing_comparison(viz_collection, output_dir):
 
     complete = [(k, v) for k, v in sorted(viz_collection.items())
                 if "task" in v and "stance" in v]
-    """
+    
 
     pdf_path = output_dir / "preprocessing_all_subjects.pdf"
     with PdfPages(pdf_path) as pdf:
@@ -310,7 +310,7 @@ def plot_preprocessing_comparison(viz_collection, output_dir):
             plt.close(fig)
 
     print(f"  PDF with {len(complete)} subjects saved to {pdf_path}")
-    """
+    
 
 def save_subject_pngs(entry, output_dir):
     """Save preprocessing_walk.png and preprocessing_stance.png for a single subject."""
