@@ -1,6 +1,6 @@
 import tensorflow as tf
 from keras.layers import (
-    Conv1D, MaxPooling1D, GRU, Dropout, Dense,
+    Conv1D, GRU, Dropout, Dense,
     BatchNormalization, GlobalAveragePooling1D,
     Reshape, Conv1DTranspose,
 )

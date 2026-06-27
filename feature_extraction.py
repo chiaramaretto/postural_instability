@@ -1,3 +1,4 @@
+import tensorflow as tf
 from model import CnnGru, ImuEncoder
 import argparse
 import os
@@ -10,7 +11,6 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from scipy.linalg import fractional_matrix_power
 from scipy.signal import butter, filtfilt, find_peaks
 from sklearn.model_selection import train_test_split

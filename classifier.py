@@ -110,7 +110,7 @@ def get_classifiers(seed=RANDOM_STATE):
 def discover_feature_mode(checkpoint_path=CHECKPOINT_PATH):
     available_modes = []
     if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Directory {checkpoint_path} non trovata.")
+        raise FileNotFoundError(f"Directory {checkpoint_path} not found.")
 
     for fname in os.listdir(checkpoint_path):
         if fname.startswith(FEATURE_PREFIX) and fname.endswith(".csv"):
@@ -118,9 +118,9 @@ def discover_feature_mode(checkpoint_path=CHECKPOINT_PATH):
             available_modes.append(mode)
 
     if not available_modes:
-        raise FileNotFoundError("Nessun file train_features_enriched_*.csv trovato.")
-    
-    # Ritorna il primo trovato se è in modalità auto
+        raise FileNotFoundError("No train_features_enriched_*.csv file found.")
+
+    # Return the first match if in auto mode
     return sorted(available_modes)[0]
 
 def binary_confusion_stats(y_true, y_pred):
@@ -143,7 +143,7 @@ def run_ablation(arch_mode, seed=RANDOM_STATE):
 
         if not os.path.exists(train_path) or not os.path.exists(test_path):
             print(train_path, test_path)
-            raise FileNotFoundError(f"File mancanti per la modalità: '{arch_mode}'")
+            raise FileNotFoundError(f"Missing files for mode: '{arch_mode}'")
 
         print(f"Loading enriched features from disk ({arch_mode})...")
         train_df = pd.read_csv(train_path)

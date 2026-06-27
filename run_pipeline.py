@@ -1,7 +1,6 @@
 import argparse
 import time
-
-
+import tensorflow  
 def run_step(label, fn, *args, **kwargs):
     print(f"\n{'='*60}")
     print(f"  {label}")

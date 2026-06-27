@@ -210,23 +210,23 @@ def create_windows(df, min_windows=1):
     x, y, meta = np.array(windows, dtype=np.float32), np.array(labels, dtype=np.float32), pd.DataFrame(metadata_rows)
 
     # --- PHASE 3: Quality Filter for Subjects ---
-    # Garantisce che ogni soggetto abbia almeno min_windows per task (Stance OR Walk)
+    # Ensure each subject has at least min_windows per task (Stance OR Walk)
     meta['ds_sid'] = list(zip(meta['dataset'], meta['subjectID']))
     
-    # Conta quante finestre ha ogni soggetto per ogni task
+    # Count how many windows each subject has per task
     counts = meta.groupby(['ds_sid', 'taskID']).size().unstack(fill_value=0)
     
-    # Condizione: Walk (2) >= min E Stance (0 o 1) >= min
-    # Usiamo .get() per gestire il caso in cui un task manchi totalmente incounts
+    # Condition: Walk (2) >= min AND Stance (0 or 1) >= min
+    # Use .get() to handle the case where a task is entirely missing from counts
     valid_mask = (counts.get(2, 0) >= min_windows) & \
                  ((counts.get(0, 0) >= min_windows) | (counts.get(1, 0) >= min_windows))
     
     valid_ds_sids = counts[valid_mask].index
     
-    # Applica il filtro finale
+    # Apply the final filter
     final_indices = meta[meta['ds_sid'].isin(valid_ds_sids)].index
     
-    print(f"Scartate {len(x) - len(final_indices)} finestre appartenenti a soggetti incompleti o con dati insufficienti.")
+    print(f"Discarded {len(x) - len(final_indices)} windows belonging to subjects with incomplete data or insufficient windows.")
     
     return x[final_indices], y[final_indices], meta.loc[final_indices].drop(columns=['ds_sid'])
 # =========================================================================
@@ -391,16 +391,16 @@ def main():
         df = pd.read_csv(sensor_path)
         df["subjectID"] = df["subjectID"].astype(str).str.strip()
         
-        # Raggruppa per soggetto e trova i task unici svolti
+        # Group by subject and find the unique tasks performed
         subject_tasks = df.groupby("subjectID")["taskID"].unique()
         
         for sid, tasks in subject_tasks.items():
-            # Condizione: deve avere il 2 (Walk) E (0 oppure 1) (Stance)
+            # Condition: must have task 2 (Walk) AND (0 or 1) (Stance)
             has_walk = 2 in tasks
             has_stance = 0 in tasks or 1 in tasks
             
             if has_walk and has_stance:
-                # Verifica anche che il soggetto abbia un'etichetta clinica
+                # Also verify the subject has a clinical label
                 if (ds_name, sid) in clinical_map:
                     valid_subjects.add((ds_name, sid))
 
@@ -470,7 +470,7 @@ def main():
 
     if viz_collection:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        plot_preprocessing_comparison(viz_collection, OUTPUT_DIR)
+        #plot_preprocessing_comparison(viz_collection, OUTPUT_DIR)
         if (VIZ_SUBJECT is not None
                 and VIZ_SUBJECT in viz_collection
                 and "task"   in viz_collection[VIZ_SUBJECT]

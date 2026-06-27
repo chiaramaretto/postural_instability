@@ -1,7 +1,7 @@
+import tensorflow as tf
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
 from sklearn.utils import class_weight
 from itertools import combinations
 
