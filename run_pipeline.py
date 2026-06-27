@@ -1,5 +1,4 @@
 import argparse
-import sys
 import time
 
 
@@ -15,13 +14,7 @@ def run_step(label, fn, *args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run the full postural instability pipeline (steps 2-4)."
-    )
-    parser.add_argument(
-        "--arch-mode",
-        choices=["autoencoder", "classifier"],
-        default="autoencoder",
-        help="Encoder architecture to use (default: autoencoder)",
+        description="Run the full postural instability pipeline."
     )
     parser.add_argument(
         "--seed",
@@ -29,55 +22,48 @@ def main():
         default=42,
         help="Random seed (default: 42)",
     )
-    parser.add_argument(
-        "--skip-preprocessing",
-        action="store_true",
-        help="Skip step 2 if preprocessed data already exists",
-    )
     args = parser.parse_args()
 
     print(f"\nPostural Instability Pipeline")
-    print(f"  arch-mode : {args.arch_mode}")
-    print(f"  seed      : {args.seed}")
+    print(f"  seed : {args.seed}")
 
     # Step 2 — Preprocessing
-    if not args.skip_preprocessing:
-        import preprocessing
-        run_step("Step 2 — Preprocessing", preprocessing.main)
-    else:
-        print("\nStep 2 skipped (--skip-preprocessing).")
+    import preprocessing
+    run_step("Step 2 — Preprocessing", preprocessing.main)
 
-    # Step 3 — Feature extraction
+    # Step 3 — Feature extraction (both arch modes)
     import feature_extraction
-    run_step(
-        f"Step 3 — Feature extraction ({args.arch_mode})",
-        feature_extraction.main,
-        arch_mode=args.arch_mode,
-        seed=args.seed,
-    )
+    for arch in ["classifier", "autoencoder"]:
+        run_step(
+            f"Step 3 — Feature extraction ({arch})",
+            feature_extraction.main,
+            arch_mode=arch,
+            seed=args.seed,
+        )
 
-    # Step 4a — Classification
+    # Step 4a — Classification (both arch modes)
     import classifier
-    run_step(
-        f"Step 4a — Postural instability classification ({args.arch_mode})",
-        classifier.run_ablation,
-        arch_mode=args.arch_mode,
-        seed=args.seed,
-    )
+    for arch in ["classifier", "autoencoder"]:
+        run_step(
+            f"Step 4a — Postural instability classification ({arch})",
+            classifier.run_ablation,
+            arch_mode=arch,
+            seed=args.seed,
+        )
 
-    # Step 4b — Domain separability
+    # Step 4b — Domain separability (both arch modes)
     import domain_classifier
     run_step(
-        f"Step 4b — Domain separability analysis ({args.arch_mode})",
+        "Step 4b — Domain separability analysis",
         domain_classifier.main,
-        arch_mode_filter=args.arch_mode,
+        arch_mode_filter=None,
         seed=args.seed,
     )
 
     print(f"\n{'='*60}")
     print("  Pipeline complete.")
-    print(f"  Results saved to: posturalInstability/results/")
-    print(f"  Models saved to:  posturalInstability/models/")
+    print(f"  Results saved to: results/")
+    print(f"  Models saved to:  models/")
     print(f"{'='*60}\n")
 
 

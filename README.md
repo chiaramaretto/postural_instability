@@ -154,10 +154,11 @@ python domain_classifier.py --arch-mode autoencoder --seed 42
 ## Running the Full Pipeline
 
 ```bash
-python run_pipeline.py --arch-mode autoencoder --seed 42
+python run_pipeline.py           # seed 42 (default)
+python run_pipeline.py --seed 0  # custom seed
 ```
 
-This executes steps 2–4 in sequence. Step 1 (`clean_data.ipynb`) must be completed manually before running the pipeline.
+This executes all steps in sequence: preprocessing, then feature extraction for both encoder variants (`classifier` and `autoencoder`), then postural instability classification and domain separability analysis for both. Step 1 (`clean_data.ipynb`) must be completed manually before running the pipeline.
 
 ---
 
