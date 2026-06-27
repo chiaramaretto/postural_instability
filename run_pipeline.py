@@ -1,24 +1,3 @@
-"""
-run_pipeline.py
----------------
-Orchestrates the full postural instability pipeline:
-
-  Step 2 — preprocessing.py         : filter, resample, window
-  Step 3 — feature_extraction.py    : train encoder, extract features, apply DA
-  Step 4a — classifier.py           : postural instability classification
-  Step 4b — domain_classifier.py    : domain separability analysis
-
-Step 1 (dataset harmonisation, clean_data.ipynb) must be completed manually
-before running this script.
-
-Usage
------
-    python run_pipeline.py                          # default: autoencoder, seed 42
-    python run_pipeline.py --arch-mode classifier
-    python run_pipeline.py --arch-mode autoencoder --seed 0
-    python run_pipeline.py --skip-preprocessing     # if windows already exist
-"""
-
 import argparse
 import sys
 import time
