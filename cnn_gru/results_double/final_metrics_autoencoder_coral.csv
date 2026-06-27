@@ -1,0 +1,2 @@
+Mode,Stance clf,Stance feat,Stance score,Walk clf,Walk feat,Walk score,W_Stance,W_Walk,Val composite score,Balanced Acc,ROC-AUC,Precision,Recall (PD),Spec. (HC),F1,TP,TN,FP,FN,"Spearman(prob,4cls)"
+autoencoder_coral,GradientBoosting,Handcrafted,0.60897,GradientBoosting,Latent,0.67778,0.0,1.0,0.7243589743589745,0.5972,0.6528,0.5556,0.4167,0.7778,0.4762,5,14,4,7,0.2635

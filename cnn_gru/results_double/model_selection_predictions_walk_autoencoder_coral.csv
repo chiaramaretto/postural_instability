@@ -1,0 +1,496 @@
+Classifier,Feature Set,SubjectID,Probability,True Label, True Label 4-Class
+RandomForest,Latent,75,0.6898839034282556,1,1
+RandomForest,Latent,nls190,0.3914894123529566,0,0
+RandomForest,Latent,18,0.5396712162201511,0,0
+RandomForest,Latent,14,0.28546689364251826,0,0
+RandomForest,Latent,nls172,0.2063976738958592,0,0
+RandomForest,Latent,nls143,0.6760903293591214,1,3
+RandomForest,Latent,wpd003,0.6879065168404657,1,1
+RandomForest,Latent,22,0.40698123913796397,0,0
+RandomForest,Latent,nls160,0.34487068563043527,0,0
+RandomForest,Latent,wpd001,0.6337367375247014,0,0
+RandomForest,Latent,25,0.5054960819544143,0,0
+RandomForest,Latent,23,0.4097057881194706,0,0
+RandomForest,Latent,nls196,0.731510792971562,1,3
+RandomForest,Latent,8,0.49450343545590403,0,0
+RandomForest,Latent,nls121,0.3833061181030474,0,0
+RandomForest,Latent,wpd024,0.20964745202576593,0,0
+RandomForest,Latent,53,0.37507648184070985,1,2
+RandomForest,Latent,nls198,0.3240336051667912,1,1
+RandomForest,Latent,40,0.4765277309750351,1,1
+RandomForest,Latent,nls161,0.35899494926204684,1,1
+RandomForest,Latent,44,0.4883284516038592,1,2
+RandomForest,Latent,wpd016,0.3260590328475594,0,0
+RandomForest,Latent,wpd023,0.4261849114985144,0,0
+RandomForest,Latent,nls162,0.2744254180612019,0,0
+RandomForest,Latent,31,0.33725985496518496,1,1
+RandomForest,Latent,wpd012,0.6312794584917801,0,0
+RandomForest,Latent,41,0.3514997075516731,1,3
+RandomForest,Latent,wpd022,0.4442955969481196,0,0
+RandomForest,Latent,nls183,0.3257624463393059,0,0
+RandomForest,Latent,8,0.6400519503832223,0,0
+RandomForest,Latent,81,0.32510104180008403,1,2
+RandomForest,Latent,nls140,0.5294443956320843,1,2
+RandomForest,Latent,102,0.6505888277308512,0,0
+RandomForest,Latent,38,0.44697937038900726,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+RandomForest,Latent,nls195,0.21753032260668476,0,0
+RandomForest,Latent,wpd014,0.3291929859447512,0,0
+RandomForest,Latent,7,0.4530322659885876,0,0
+RandomForest,Latent,wpd018,0.3192920637973107,1,1
+RandomForest,Latent,nls127,0.6556995070500273,0,0
+RandomForest,Latent,wpd025,0.6294987905090875,1,1
+RandomForest,Latent,4,0.5394295950228949,1,3
+RandomForest,Latent,28,0.5314194014793483,1,1
+RandomForest,Latent,42,0.6161637658163783,1,2
+RandomForest,Latent,21,0.3724436431013483,1,1
+RandomForest,Latent,nls182,0.41394282014959305,0,0
+RandomForest,Latent,wpd021,0.1805421820845498,0,0
+RandomForest,Latent,wpd007,0.31533345191931306,0,0
+RandomForest,Latent,nls177,0.6392170491660248,1,1
+RandomForest,Latent,nls192,0.2461465726198082,0,0
+RandomForest,Handcrafted,75,0.3236244641460631,1,1
+RandomForest,Handcrafted,nls190,0.45800380834775367,0,0
+RandomForest,Handcrafted,18,0.4167204168551996,0,0
+RandomForest,Handcrafted,14,0.3931706549277603,0,0
+RandomForest,Handcrafted,nls172,0.3611730230159615,0,0
+RandomForest,Handcrafted,nls143,0.6773215915867458,1,3
+RandomForest,Handcrafted,wpd003,0.5955185061443947,1,1
+RandomForest,Handcrafted,22,0.29472271123667165,0,0
+RandomForest,Handcrafted,nls160,0.36299773032496424,0,0
+RandomForest,Handcrafted,wpd001,0.5013514881604422,0,0
+RandomForest,Handcrafted,25,0.31820991289587075,0,0
+RandomForest,Handcrafted,23,0.3115381812449857,0,0
+RandomForest,Handcrafted,nls196,0.5676329687962822,1,3
+RandomForest,Handcrafted,8,0.29176306918189376,0,0
+RandomForest,Handcrafted,nls121,0.38919402757855437,0,0
+RandomForest,Handcrafted,wpd024,0.5831685954381889,0,0
+RandomForest,Handcrafted,53,0.36807252643227184,1,2
+RandomForest,Handcrafted,nls198,0.3715630530957279,1,1
+RandomForest,Handcrafted,40,0.3840634017078467,1,1
+RandomForest,Handcrafted,nls161,0.34966506194517166,1,1
+RandomForest,Handcrafted,44,0.31806319745905964,1,2
+RandomForest,Handcrafted,wpd016,0.3862592646151598,0,0
+RandomForest,Handcrafted,wpd023,0.40067806028947645,0,0
+RandomForest,Handcrafted,nls162,0.3845065275785543,0,0
+RandomForest,Handcrafted,31,0.3715326347223114,1,1
+RandomForest,Handcrafted,wpd012,0.5470282518663807,0,0
+RandomForest,Handcrafted,41,0.43363893829291145,1,3
+RandomForest,Handcrafted,wpd022,0.5071890723001805,0,0
+RandomForest,Handcrafted,nls183,0.4692064814049627,0,0
+RandomForest,Handcrafted,8,0.5661065154801574,0,0
+RandomForest,Handcrafted,81,0.36807252643227184,1,2
+RandomForest,Handcrafted,nls140,0.5470653974665929,1,2
+RandomForest,Handcrafted,102,0.39380909046849466,0,0
+RandomForest,Handcrafted,38,0.5803513990311612,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+RandomForest,Handcrafted,nls195,0.3615099656356681,0,0
+RandomForest,Handcrafted,wpd014,0.4914647252994434,0,0
+RandomForest,Handcrafted,7,0.4384042038989338,0,0
+RandomForest,Handcrafted,wpd018,0.3342140864767658,1,1
+RandomForest,Handcrafted,nls127,0.4861619307689985,0,0
+RandomForest,Handcrafted,wpd025,0.690321135754685,1,1
+RandomForest,Handcrafted,4,0.44770141448454454,1,3
+RandomForest,Handcrafted,28,0.4187566604147472,1,1
+RandomForest,Handcrafted,42,0.4073053577350638,1,2
+RandomForest,Handcrafted,21,0.5046579255292799,1,1
+RandomForest,Handcrafted,nls182,0.3491945357568624,0,0
+RandomForest,Handcrafted,wpd021,0.2832519811664152,0,0
+RandomForest,Handcrafted,wpd007,0.2469575096918247,0,0
+RandomForest,Handcrafted,nls177,0.5839948592960041,1,1
+RandomForest,Handcrafted,nls192,0.31789966433560485,0,0
+RandomForest,Combined,75,0.6428680019265575,1,1
+RandomForest,Combined,nls190,0.4695577189512732,0,0
+RandomForest,Combined,18,0.5365064911472663,0,0
+RandomForest,Combined,14,0.31206575998930586,0,0
+RandomForest,Combined,nls172,0.2562292742620068,0,0
+RandomForest,Combined,nls143,0.7100558590282382,1,3
+RandomForest,Combined,wpd003,0.689476312965098,1,1
+RandomForest,Combined,22,0.4110519808167889,0,0
+RandomForest,Combined,nls160,0.3265017957771485,0,0
+RandomForest,Combined,wpd001,0.6339221779984069,0,0
+RandomForest,Combined,25,0.5035451924442395,0,0
+RandomForest,Combined,23,0.3846815072978539,0,0
+RandomForest,Combined,nls196,0.6186362020722622,1,3
+RandomForest,Combined,8,0.5403631800553159,0,0
+RandomForest,Combined,nls121,0.36299923694587954,0,0
+RandomForest,Combined,wpd024,0.3369636720322852,0,0
+RandomForest,Combined,53,0.40654584740752125,1,2
+RandomForest,Combined,nls198,0.326481200226782,1,1
+RandomForest,Combined,40,0.43645638425769046,1,1
+RandomForest,Combined,nls161,0.3110991840124787,1,1
+RandomForest,Combined,44,0.5069147091760899,1,2
+RandomForest,Combined,wpd016,0.28261268500257936,0,0
+RandomForest,Combined,wpd023,0.4263581582124429,0,0
+RandomForest,Combined,nls162,0.266662727907159,0,0
+RandomForest,Combined,31,0.37412753592287107,1,1
+RandomForest,Combined,wpd012,0.5870350922175217,0,0
+RandomForest,Combined,41,0.3855825936269313,1,3
+RandomForest,Combined,wpd022,0.38192494417249817,0,0
+RandomForest,Combined,nls183,0.38883152344891925,0,0
+RandomForest,Combined,8,0.6765968947805885,0,0
+RandomForest,Combined,81,0.3344569578799522,1,2
+RandomForest,Combined,nls140,0.506961262759712,1,2
+RandomForest,Combined,102,0.6181463314087612,0,0
+RandomForest,Combined,38,0.490659523969465,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+RandomForest,Combined,nls195,0.24192646290724418,0,0
+RandomForest,Combined,wpd014,0.40458200198555466,0,0
+RandomForest,Combined,7,0.42922284275201184,0,0
+RandomForest,Combined,wpd018,0.2958118229014982,1,1
+RandomForest,Combined,nls127,0.668224658056469,0,0
+RandomForest,Combined,wpd025,0.6994376933031152,1,1
+RandomForest,Combined,4,0.6321440105797553,1,3
+RandomForest,Combined,28,0.5137751181275689,1,1
+RandomForest,Combined,42,0.6042339889786468,1,2
+RandomForest,Combined,21,0.4156836876663196,1,1
+RandomForest,Combined,nls182,0.42751535464646206,0,0
+RandomForest,Combined,wpd021,0.2325279868555894,0,0
+RandomForest,Combined,wpd007,0.334661693934573,0,0
+RandomForest,Combined,nls177,0.6330072045883858,1,1
+RandomForest,Combined,nls192,0.2216305532783927,0,0
+GradientBoosting,Latent,75,0.9447678333862729,1,1
+GradientBoosting,Latent,nls190,0.13919539472757922,0,0
+GradientBoosting,Latent,18,0.7686220282764643,0,0
+GradientBoosting,Latent,14,0.057993035613283256,0,0
+GradientBoosting,Latent,nls172,0.007179640794018505,0,0
+GradientBoosting,Latent,nls143,0.971070032228087,1,3
+GradientBoosting,Latent,wpd003,0.23960356985826323,1,1
+GradientBoosting,Latent,22,0.01952316316818451,0,0
+GradientBoosting,Latent,nls160,0.057741441981467634,0,0
+GradientBoosting,Latent,wpd001,0.872519845346224,0,0
+GradientBoosting,Latent,25,0.12280682351616054,0,0
+GradientBoosting,Latent,23,0.13656964630536542,0,0
+GradientBoosting,Latent,nls196,0.6469279895297015,1,3
+GradientBoosting,Latent,8,0.020147138631553443,0,0
+GradientBoosting,Latent,nls121,0.7876512936795831,0,0
+GradientBoosting,Latent,wpd024,0.005933517585367923,0,0
+GradientBoosting,Latent,53,0.7028638441205777,1,2
+GradientBoosting,Latent,nls198,0.012283075417612829,1,1
+GradientBoosting,Latent,40,0.7992508090735954,1,1
+GradientBoosting,Latent,nls161,0.11791871973444255,1,1
+GradientBoosting,Latent,44,0.10020029646372854,1,2
+GradientBoosting,Latent,wpd016,0.0763543706587475,0,0
+GradientBoosting,Latent,wpd023,0.13719612968099726,0,0
+GradientBoosting,Latent,nls162,0.3044569884222166,0,0
+GradientBoosting,Latent,31,0.11637967498527067,1,1
+GradientBoosting,Latent,wpd012,0.9146669593823636,0,0
+GradientBoosting,Latent,41,0.3152818744816142,1,3
+GradientBoosting,Latent,wpd022,0.300952247893846,0,0
+GradientBoosting,Latent,nls183,0.027334555701162,0,0
+GradientBoosting,Latent,8,0.6220834243838531,0,0
+GradientBoosting,Latent,81,0.08719482207818514,1,2
+GradientBoosting,Latent,nls140,0.6395848828368409,1,2
+GradientBoosting,Latent,102,0.4270135778645754,0,0
+GradientBoosting,Latent,38,0.07581899782274622,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+GradientBoosting,Latent,nls195,0.006302819573393508,0,0
+GradientBoosting,Latent,wpd014,0.03759555891774401,0,0
+GradientBoosting,Latent,7,0.11429558172660927,0,0
+GradientBoosting,Latent,wpd018,0.01393256058113149,1,1
+GradientBoosting,Latent,nls127,0.07577255593847292,0,0
+GradientBoosting,Latent,wpd025,0.9439361092934553,1,1
+GradientBoosting,Latent,4,0.7993603815878579,1,3
+GradientBoosting,Latent,28,0.3317285278982495,1,1
+GradientBoosting,Latent,42,0.47308410335975076,1,2
+GradientBoosting,Latent,21,0.10231507430401159,1,1
+GradientBoosting,Latent,nls182,0.38778427196885135,0,0
+GradientBoosting,Latent,wpd021,0.009012664932090355,0,0
+GradientBoosting,Latent,wpd007,0.12330947865638085,0,0
+GradientBoosting,Latent,nls177,0.8762553572424634,1,1
+GradientBoosting,Latent,nls192,0.018773246570547866,0,0
+GradientBoosting,Handcrafted,75,0.2511423751869982,1,1
+GradientBoosting,Handcrafted,nls190,0.09432311289570462,0,0
+GradientBoosting,Handcrafted,18,0.05767398974055357,0,0
+GradientBoosting,Handcrafted,14,0.7060138177134985,0,0
+GradientBoosting,Handcrafted,nls172,0.9428865390200615,0,0
+GradientBoosting,Handcrafted,nls143,0.8448805920824392,1,3
+GradientBoosting,Handcrafted,wpd003,0.4896537955802968,1,1
+GradientBoosting,Handcrafted,22,0.4741231129653664,0,0
+GradientBoosting,Handcrafted,nls160,0.877875255262824,0,0
+GradientBoosting,Handcrafted,wpd001,0.40496742894546917,0,0
+GradientBoosting,Handcrafted,25,0.7313309222037042,0,0
+GradientBoosting,Handcrafted,23,0.69800030262344,0,0
+GradientBoosting,Handcrafted,nls196,0.3371392356719379,1,3
+GradientBoosting,Handcrafted,8,0.6794828481016821,0,0
+GradientBoosting,Handcrafted,nls121,0.11032135494999236,0,0
+GradientBoosting,Handcrafted,wpd024,0.3438343518368557,0,0
+GradientBoosting,Handcrafted,53,0.3796389617503162,1,2
+GradientBoosting,Handcrafted,nls198,0.07160572407435725,1,1
+GradientBoosting,Handcrafted,40,0.7431455085261625,1,1
+GradientBoosting,Handcrafted,nls161,0.09496407404481289,1,1
+GradientBoosting,Handcrafted,44,0.8017820918198146,1,2
+GradientBoosting,Handcrafted,wpd016,0.0337856345979753,0,0
+GradientBoosting,Handcrafted,wpd023,0.13547066224793722,0,0
+GradientBoosting,Handcrafted,nls162,0.061486588056776266,0,0
+GradientBoosting,Handcrafted,31,0.782905190106834,1,1
+GradientBoosting,Handcrafted,wpd012,0.5363050759553676,0,0
+GradientBoosting,Handcrafted,41,0.847845739209648,1,3
+GradientBoosting,Handcrafted,wpd022,0.4968772340276967,0,0
+GradientBoosting,Handcrafted,nls183,0.3590247325185228,0,0
+GradientBoosting,Handcrafted,8,0.3345145516709228,0,0
+GradientBoosting,Handcrafted,81,0.3796389617503162,1,2
+GradientBoosting,Handcrafted,nls140,0.2791837349293776,1,2
+GradientBoosting,Handcrafted,102,0.28982186467183085,0,0
+GradientBoosting,Handcrafted,38,0.5820117813202333,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+GradientBoosting,Handcrafted,nls195,0.06039711550944177,0,0
+GradientBoosting,Handcrafted,wpd014,0.1904105776342954,0,0
+GradientBoosting,Handcrafted,7,0.07466896518070872,0,0
+GradientBoosting,Handcrafted,wpd018,0.09496407404481289,1,1
+GradientBoosting,Handcrafted,nls127,0.3258572184373451,0,0
+GradientBoosting,Handcrafted,wpd025,0.8840454924511376,1,1
+GradientBoosting,Handcrafted,4,0.08654900776208037,1,3
+GradientBoosting,Handcrafted,28,0.2151231115826254,1,1
+GradientBoosting,Handcrafted,42,0.18137243382408796,1,2
+GradientBoosting,Handcrafted,21,0.6396458411328623,1,1
+GradientBoosting,Handcrafted,nls182,0.03178738248053253,0,0
+GradientBoosting,Handcrafted,wpd021,0.5784566873579163,0,0
+GradientBoosting,Handcrafted,wpd007,0.5269119719005003,0,0
+GradientBoosting,Handcrafted,nls177,0.7202842923102635,1,1
+GradientBoosting,Handcrafted,nls192,0.13287905398515154,0,0
+GradientBoosting,Combined,75,0.9633987574842667,1,1
+GradientBoosting,Combined,nls190,0.09374317096976763,0,0
+GradientBoosting,Combined,18,0.8590981712366079,0,0
+GradientBoosting,Combined,14,0.05753850721633267,0,0
+GradientBoosting,Combined,nls172,0.002664792692485846,0,0
+GradientBoosting,Combined,nls143,0.9328051090473581,1,3
+GradientBoosting,Combined,wpd003,0.8441851660820134,1,1
+GradientBoosting,Combined,22,0.0769134007228291,0,0
+GradientBoosting,Combined,nls160,0.04500080486671244,0,0
+GradientBoosting,Combined,wpd001,0.8709716780490521,0,0
+GradientBoosting,Combined,25,0.6626113931404034,0,0
+GradientBoosting,Combined,23,0.30330599054258817,0,0
+GradientBoosting,Combined,nls196,0.46103985417232946,1,3
+GradientBoosting,Combined,8,0.07691909290670909,0,0
+GradientBoosting,Combined,nls121,0.7349293547613486,0,0
+GradientBoosting,Combined,wpd024,0.006584094030340603,0,0
+GradientBoosting,Combined,53,0.5510310384287689,1,2
+GradientBoosting,Combined,nls198,0.02767320282137471,1,1
+GradientBoosting,Combined,40,0.8069379639921734,1,1
+GradientBoosting,Combined,nls161,0.1789785628770438,1,1
+GradientBoosting,Combined,44,0.11543680470985015,1,2
+GradientBoosting,Combined,wpd016,0.07542285743416736,0,0
+GradientBoosting,Combined,wpd023,0.13332969828332897,0,0
+GradientBoosting,Combined,nls162,0.3221947987987979,0,0
+GradientBoosting,Combined,31,0.44610463145967627,1,1
+GradientBoosting,Combined,wpd012,0.9141961387928723,0,0
+GradientBoosting,Combined,41,0.7983953604659966,1,3
+GradientBoosting,Combined,wpd022,0.12459683512849372,0,0
+GradientBoosting,Combined,nls183,0.030326212792813362,0,0
+GradientBoosting,Combined,8,0.8913896857279734,0,0
+GradientBoosting,Combined,81,0.09327559982867403,1,2
+GradientBoosting,Combined,nls140,0.24821313010685617,1,2
+GradientBoosting,Combined,102,0.81912302107889,0,0
+GradientBoosting,Combined,38,0.21980866907755164,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+GradientBoosting,Combined,nls195,0.009456208936830126,0,0
+GradientBoosting,Combined,wpd014,0.21249100090516065,0,0
+GradientBoosting,Combined,7,0.398010735626896,0,0
+GradientBoosting,Combined,wpd018,0.032077632706360486,1,1
+GradientBoosting,Combined,nls127,0.17584498348207656,0,0
+GradientBoosting,Combined,wpd025,0.566405104268022,1,1
+GradientBoosting,Combined,4,0.8498116869645024,1,3
+GradientBoosting,Combined,28,0.7055449064673658,1,1
+GradientBoosting,Combined,42,0.5253413080000126,1,2
+GradientBoosting,Combined,21,0.28375491449053664,1,1
+GradientBoosting,Combined,nls182,0.5801744852047841,0,0
+GradientBoosting,Combined,wpd021,0.00429540559673375,0,0
+GradientBoosting,Combined,wpd007,0.09512454239190425,0,0
+GradientBoosting,Combined,nls177,0.9474036623883927,1,1
+GradientBoosting,Combined,nls192,0.018754364109084033,0,0
+LogisticRegression,Latent,75,1.0,1,1
+LogisticRegression,Latent,nls190,0.49078603066389337,0,0
+LogisticRegression,Latent,18,0.9999999999999583,0,0
+LogisticRegression,Latent,14,0.9555394406325591,0,0
+LogisticRegression,Latent,nls172,0.3209634052960908,0,0
+LogisticRegression,Latent,nls143,0.5656443214741721,1,3
+LogisticRegression,Latent,wpd003,0.2534649244821194,1,1
+LogisticRegression,Latent,22,3.5016199361825337e-12,0,0
+LogisticRegression,Latent,nls160,0.3732450722733429,0,0
+LogisticRegression,Latent,wpd001,0.9492754984440722,0,0
+LogisticRegression,Latent,25,0.9990341359281957,0,0
+LogisticRegression,Latent,23,8.685481763580874e-14,0,0
+LogisticRegression,Latent,nls196,0.9395161182457025,1,3
+LogisticRegression,Latent,8,0.9953936215077352,0,0
+LogisticRegression,Latent,nls121,0.5748264426395527,0,0
+LogisticRegression,Latent,wpd024,0.2957182195424875,0,0
+LogisticRegression,Latent,53,8.285367710367862e-14,1,2
+LogisticRegression,Latent,nls198,0.6995498483203029,1,1
+LogisticRegression,Latent,40,4.211422222496395e-08,1,1
+LogisticRegression,Latent,nls161,0.5800738587734294,1,1
+LogisticRegression,Latent,44,0.9999769277828803,1,2
+LogisticRegression,Latent,wpd016,0.5367469681813544,0,0
+LogisticRegression,Latent,wpd023,0.6199731495084148,0,0
+LogisticRegression,Latent,nls162,0.4900326377160919,0,0
+LogisticRegression,Latent,31,0.8471724749446494,1,1
+LogisticRegression,Latent,wpd012,0.8405367154200731,0,0
+LogisticRegression,Latent,41,1.0834739265324236e-20,1,3
+LogisticRegression,Latent,wpd022,0.9601359448489933,0,0
+LogisticRegression,Latent,nls183,0.5042691651224444,0,0
+LogisticRegression,Latent,8,1.0,0,0
+LogisticRegression,Latent,81,1.870748146538786e-70,1,2
+LogisticRegression,Latent,nls140,0.26312945465634874,1,2
+LogisticRegression,Latent,102,3.929330031934158e-08,0,0
+LogisticRegression,Latent,38,0.9949559947134051,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+LogisticRegression,Latent,nls195,0.316329843694538,0,0
+LogisticRegression,Latent,wpd014,0.2544529756799958,0,0
+LogisticRegression,Latent,7,0.9934680560491443,0,0
+LogisticRegression,Latent,wpd018,0.4117405945503792,1,1
+LogisticRegression,Latent,nls127,0.10216394345801158,0,0
+LogisticRegression,Latent,wpd025,0.8738698557552954,1,1
+LogisticRegression,Latent,4,1.0488352015235668e-07,1,3
+LogisticRegression,Latent,28,0.004033575429012369,1,1
+LogisticRegression,Latent,42,1.0,1,2
+LogisticRegression,Latent,21,0.9999725761329876,1,1
+LogisticRegression,Latent,nls182,0.4996680132249277,0,0
+LogisticRegression,Latent,wpd021,0.2703365963677074,0,0
+LogisticRegression,Latent,wpd007,0.3188498663449078,0,0
+LogisticRegression,Latent,nls177,0.16759250116433347,1,1
+LogisticRegression,Latent,nls192,0.39796288214980585,0,0
+LogisticRegression,Handcrafted,75,0.999804495107299,1,1
+LogisticRegression,Handcrafted,nls190,0.505949636360847,0,0
+LogisticRegression,Handcrafted,18,0.9404113557382707,0,0
+LogisticRegression,Handcrafted,14,0.3923086813825052,0,0
+LogisticRegression,Handcrafted,nls172,0.3753602682317658,0,0
+LogisticRegression,Handcrafted,nls143,0.5221478238832524,1,3
+LogisticRegression,Handcrafted,wpd003,0.6113217417732653,1,1
+LogisticRegression,Handcrafted,22,0.00020364096469805253,0,0
+LogisticRegression,Handcrafted,nls160,0.43562427761443,0,0
+LogisticRegression,Handcrafted,wpd001,0.6257852434880368,0,0
+LogisticRegression,Handcrafted,25,0.0005854469767494657,0,0
+LogisticRegression,Handcrafted,23,3.114077994664612e-06,0,0
+LogisticRegression,Handcrafted,nls196,0.5502198065125857,1,3
+LogisticRegression,Handcrafted,8,0.0003593767816713901,0,0
+LogisticRegression,Handcrafted,nls121,0.6888215900194624,0,0
+LogisticRegression,Handcrafted,wpd024,0.43063748985776507,0,0
+LogisticRegression,Handcrafted,53,1.0663317919635184e-15,1,2
+LogisticRegression,Handcrafted,nls198,0.5426700396910749,1,1
+LogisticRegression,Handcrafted,40,0.005663551217877019,1,1
+LogisticRegression,Handcrafted,nls161,0.4109321309027716,1,1
+LogisticRegression,Handcrafted,44,0.007363058850084379,1,2
+LogisticRegression,Handcrafted,wpd016,0.49623270286556465,0,0
+LogisticRegression,Handcrafted,wpd023,0.5384795581703659,0,0
+LogisticRegression,Handcrafted,nls162,0.5958443690675732,0,0
+LogisticRegression,Handcrafted,31,0.3395080608130749,1,1
+LogisticRegression,Handcrafted,wpd012,0.4963270721732697,0,0
+LogisticRegression,Handcrafted,41,0.6505677642831519,1,3
+LogisticRegression,Handcrafted,wpd022,0.568333503333811,0,0
+LogisticRegression,Handcrafted,nls183,0.529187906373168,0,0
+LogisticRegression,Handcrafted,8,9.634590078870589e-06,0,0
+LogisticRegression,Handcrafted,81,0.9999997685569204,1,2
+LogisticRegression,Handcrafted,nls140,0.5094862345907624,1,2
+LogisticRegression,Handcrafted,102,0.9999443856726337,0,0
+LogisticRegression,Handcrafted,38,0.9999607700914596,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+LogisticRegression,Handcrafted,nls195,0.6612748316253796,0,0
+LogisticRegression,Handcrafted,wpd014,0.48527429375196335,0,0
+LogisticRegression,Handcrafted,7,0.9878768578988762,0,0
+LogisticRegression,Handcrafted,wpd018,0.371591444506438,1,1
+LogisticRegression,Handcrafted,nls127,0.5131056758760864,0,0
+LogisticRegression,Handcrafted,wpd025,0.6722053300543976,1,1
+LogisticRegression,Handcrafted,4,0.9980727685122667,1,3
+LogisticRegression,Handcrafted,28,0.6187895468353452,1,1
+LogisticRegression,Handcrafted,42,0.9995875892996917,1,2
+LogisticRegression,Handcrafted,21,0.9971808275414416,1,1
+LogisticRegression,Handcrafted,nls182,0.6009576539857503,0,0
+LogisticRegression,Handcrafted,wpd021,0.3577991985499957,0,0
+LogisticRegression,Handcrafted,wpd007,0.3063373350393863,0,0
+LogisticRegression,Handcrafted,nls177,0.5848918570589859,1,1
+LogisticRegression,Handcrafted,nls192,0.47036450717455924,0,0
+LogisticRegression,Combined,75,1.0,1,1
+LogisticRegression,Combined,nls190,0.3889309591512349,0,0
+LogisticRegression,Combined,18,0.999999999999948,0,0
+LogisticRegression,Combined,14,0.9960944290966252,0,0
+LogisticRegression,Combined,nls172,0.30396987816189724,0,0
+LogisticRegression,Combined,nls143,0.5647880098867678,1,3
+LogisticRegression,Combined,wpd003,0.2792983648374055,1,1
+LogisticRegression,Combined,22,6.9706455028013625e-09,0,0
+LogisticRegression,Combined,nls160,0.39153259403537993,0,0
+LogisticRegression,Combined,wpd001,0.9529471998170396,0,0
+LogisticRegression,Combined,25,0.9993886287311321,0,0
+LogisticRegression,Combined,23,3.2477731297788634e-19,0,0
+LogisticRegression,Combined,nls196,0.9238921234867283,1,3
+LogisticRegression,Combined,8,0.9997176399292467,0,0
+LogisticRegression,Combined,nls121,0.5724583665123246,0,0
+LogisticRegression,Combined,wpd024,0.26177912153026617,0,0
+LogisticRegression,Combined,53,1.188493948673394e-28,1,2
+LogisticRegression,Combined,nls198,0.6928482522805877,1,1
+LogisticRegression,Combined,40,8.496169138905763e-10,1,1
+LogisticRegression,Combined,nls161,0.5664479053471417,1,1
+LogisticRegression,Combined,44,0.9999995771876036,1,2
+LogisticRegression,Combined,wpd016,0.4795292805482766,0,0
+LogisticRegression,Combined,wpd023,0.6357794471504553,0,0
+LogisticRegression,Combined,nls162,0.474568906559732,0,0
+LogisticRegression,Combined,31,0.9591111079465032,1,1
+LogisticRegression,Combined,wpd012,0.7977281363958375,0,0
+LogisticRegression,Combined,41,7.313781638223566e-24,1,3
+LogisticRegression,Combined,wpd022,0.9270986863911,0,0
+LogisticRegression,Combined,nls183,0.46251253454103186,0,0
+LogisticRegression,Combined,8,1.0,0,0
+LogisticRegression,Combined,81,1.089372509880589e-71,1,2
+LogisticRegression,Combined,nls140,0.22574384029430147,1,2
+LogisticRegression,Combined,102,0.8029551838119353,0,0
+LogisticRegression,Combined,38,0.9999959965210711,subjectID
+38    0
+38    1
+Name: y_true, dtype: int32,subjectID
+38    0
+38    3
+Name: y_true_4cls, dtype: int32
+LogisticRegression,Combined,nls195,0.2975014485952131,0,0
+LogisticRegression,Combined,wpd014,0.23869412189207423,0,0
+LogisticRegression,Combined,7,0.9993682075804312,0,0
+LogisticRegression,Combined,wpd018,0.3791626202569779,1,1
+LogisticRegression,Combined,nls127,0.09244001617065951,0,0
+LogisticRegression,Combined,wpd025,0.779599484361382,1,1
+LogisticRegression,Combined,4,7.883319548903924e-10,1,3
+LogisticRegression,Combined,28,0.0006319791337818976,1,1
+LogisticRegression,Combined,42,1.0,1,2
+LogisticRegression,Combined,21,0.9999932884813137,1,1
+LogisticRegression,Combined,nls182,0.4849005518910567,0,0
+LogisticRegression,Combined,wpd021,0.23048697656426004,0,0
+LogisticRegression,Combined,wpd007,0.3092676470871469,0,0
+LogisticRegression,Combined,nls177,0.16683436935875923,1,1
+LogisticRegression,Combined,nls192,0.36249570680966847,0,0

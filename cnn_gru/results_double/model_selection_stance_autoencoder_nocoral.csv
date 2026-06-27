@@ -1,0 +1,10 @@
+task,mode,Classifier,Feature Set,score,Bal Acc val,Spearman val,Train Acc,Val AUC
+stance,autoencoder_nocoral,LogisticRegression,Latent,0.52564,0.5256,0.0174,0.7159,0.4701
+stance,autoencoder_nocoral,GradientBoosting,Handcrafted,0.50855,0.5085,-0.0929,1.0,0.4573
+stance,autoencoder_nocoral,GradientBoosting,Latent,0.49786,0.4979,0.1131,1.0,0.5385
+stance,autoencoder_nocoral,GradientBoosting,Combined,0.49786,0.4979,-0.0213,1.0,0.4915
+stance,autoencoder_nocoral,RandomForest,Latent,0.44872,0.4487,-0.0766,0.9432,0.3974
+stance,autoencoder_nocoral,LogisticRegression,Combined,0.44231,0.4423,-0.0748,0.7045,0.4402
+stance,autoencoder_nocoral,RandomForest,Combined,0.43162,0.4316,-0.2089,0.9318,0.3803
+stance,autoencoder_nocoral,RandomForest,Handcrafted,0.42521,0.4252,0.0301,0.7955,0.547
+stance,autoencoder_nocoral,LogisticRegression,Handcrafted,0.38675,0.3868,-0.1958,0.6477,0.3974

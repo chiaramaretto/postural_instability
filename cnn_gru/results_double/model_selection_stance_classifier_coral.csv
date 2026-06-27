@@ -1,0 +1,10 @@
+task,mode,Classifier,Feature Set,score,Bal Acc val,Spearman val,Train Acc,Val AUC
+stance,classifier_coral,LogisticRegression,Latent,0.56838,0.5684,-0.0009,0.75,0.4829
+stance,classifier_coral,LogisticRegression,Combined,0.55769,0.5577,0.1088,0.75,0.5513
+stance,classifier_coral,RandomForest,Handcrafted,0.54274,0.5427,0.0526,0.875,0.5342
+stance,classifier_coral,LogisticRegression,Handcrafted,0.53632,0.5363,0.1042,0.5682,0.5855
+stance,classifier_coral,GradientBoosting,Handcrafted,0.53205,0.5321,-0.0304,1.0,0.4829
+stance,classifier_coral,GradientBoosting,Combined,0.48718,0.4872,0.0589,1.0,0.5
+stance,classifier_coral,GradientBoosting,Latent,0.47009,0.4701,0.0464,1.0,0.4786
+stance,classifier_coral,RandomForest,Latent,0.44231,0.4423,0.1171,0.875,0.4786
+stance,classifier_coral,RandomForest,Combined,0.44231,0.4423,0.1455,0.8864,0.5085
