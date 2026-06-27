@@ -1,9 +1,5 @@
 data/
+models/
+results/
 __pycache__/
-cnn_gru/models
-cnn_gru/results
-cnn_gru/__pycache__/
 extract_turn/__pycache__/
-cnn_gru/data_double/
-cnn_gru/models_double/
-cnn_gru/results_double/

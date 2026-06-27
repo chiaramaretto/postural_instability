@@ -1,4 +1,0 @@
-Balanced Acc,ROC-AUC,Precision,Recall (PD),Spec. (HC),F1,TP,TN,FP,FN,Dataset,N,Task coverage
-0.675,0.7,0.5,0.6,0.75,0.5455,3,9,3,2,wearpd,17,both
-0.5,0.2,0.7143,1.0,0.0,0.8333,5,0,2,0,omnia_park,7,both
-0.625,0.75,0.4,1.0,0.25,0.5714,2,1,3,0,kiel,6,both
