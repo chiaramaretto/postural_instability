@@ -21,15 +21,17 @@ Postural instability is one of the most disabling motor symptoms of Parkinson's 
 
 The pipeline uses five datasets, each recorded with an IMU sensor worn on the lower back:
 
-| Dataset     | Sampling rate | Subjects |
-|-------------|---------------|----------|
-| FOG-STAR    | 60 Hz         | -        |
-| Omnia-Park  | 90 Hz         | -        |
-| PD-Phone    | 200 Hz        | -        |
-| WearPD      | 100 Hz        | -        |
-| KIEL        | 200 Hz        | -        |
+| Dataset     | Sampling rate | Used in analysis |
+|-------------|---------------|------------------|
+| FOG-STAR    | 60 Hz         | no               |
+| Omnia-Park  | 90 Hz         | yes              |
+| PD-Phone    | 200 Hz        | no               |
+| WearPD      | 100 Hz        | yes              |
+| KIEL        | 200 Hz        | yes              |
 
-Each dataset is expected in two CSV files per dataset: `<name>_sensor.csv` (raw IMU signals) and `<name>_clinical.csv` (demographic and clinical data including the postural stability label). The data is not included in this repository due to redistribution restrictions. Please refer to the original dataset publications to obtain access.
+The preprocessing pipeline attempts to load all five datasets, but applies strict subject-level filters: each subject must have at least one walking segment (taskID = 2) and at least one stance segment (taskID = 0 or 1), and must have a valid postural stability label in the clinical file. FOG-STAR and PD-Phone do not satisfy these criteria after harmonisation and are therefore excluded from the final windowed dataset. The analysis is conducted on Omnia-Park, WearPD, and KIEL.
+
+Each dataset is expected in two CSV files: `<name>_sensor.csv` (raw IMU signals) and `<name>_clinical.csv` (demographic and clinical data including the postural stability label). The data is not included in this repository due to redistribution restrictions. Please refer to the original dataset publications to obtain access.
 
 The required common format after harmonisation (produced by `clean_data.ipynb`) is:
 
