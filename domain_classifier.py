@@ -21,8 +21,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.svm import SVC
 
-CHECKPOINT_PATH = "posturalInstability/models/"
-RESULTS_PATH    = "posturalInstability/results/"
+CHECKPOINT_PATH = "models/"
+RESULTS_PATH    = "results/"
 LATENT_DIM      = 8
 LATENT_BLOCK    = 4 * LATENT_DIM   # 32 dims
 RANDOM_STATE    = 42

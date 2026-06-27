@@ -22,8 +22,8 @@ TARGET_CLASS_RATIO = 0.85
 # Subject to use for the standalone preprocessing PNG figures (set to None to skip)
 VIZ_SUBJECT = ("wearpd", "wpd006")
 
-RAW_DATA_DIR = Path("posturalInstability/data/cleaned_data")
-OUTPUT_DIR = Path("posturalInstability/data/preprocessed_data/")
+RAW_DATA_DIR = Path("data/cleaned_data")
+OUTPUT_DIR = Path("data/preprocessed_data/")
 
 # =========================================================================
 # 1. CLEANING AND FILTERING FUNCTIONS

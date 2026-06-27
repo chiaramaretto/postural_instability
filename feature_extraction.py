@@ -19,9 +19,9 @@ from sklearn.model_selection import train_test_split
 from train import train_autoencoder, train_classifier
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATA_PATH       = "posturalInstability/data/preprocessed_data/"
-CHECKPOINT_PATH = "posturalInstability/models/"
-RESULTS_PATH    = "posturalInstability/results/"
+DATA_PATH       = "data/preprocessed_data/"
+CHECKPOINT_PATH = "models/"
+RESULTS_PATH    = "results/"
 RANDOM_STATE    = 42
 FS              = 64
 

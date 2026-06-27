@@ -16,8 +16,8 @@ from sklearn.metrics import (
 from sklearn.feature_selection import VarianceThreshold, RFE
 from sklearn.preprocessing import StandardScaler
 
-CHECKPOINT_PATH = "posturalInstability/models/"
-RESULTS_PATH    = "posturalInstability/results/"
+CHECKPOINT_PATH = "models/"
+RESULTS_PATH    = "results/"
 LATENT_DIM      = 8
 FEATURE_PREFIX  = "train_features_enriched_"
 RANDOM_STATE    = 42
