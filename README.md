@@ -57,6 +57,7 @@ posturalInstability/
 ├── models/                      # not tracked — created at runtime
 ├── results/                     # not tracked — created at runtime
 ├── extract_turn/                # turn detection module (Pham algorithm)
+├── params.py                    # central configuration (hyperparameters)
 ├── clean_data.ipynb             # step 1: dataset harmonisation
 ├── preprocessing.py             # step 2: filtering, resampling, windowing
 ├── model.py                     # CNN-GRU and masked autoencoder definitions
@@ -188,17 +189,17 @@ pip install tensorflow numpy pandas scikit-learn scipy matplotlib seaborn umap-l
 
 ## Configuration
 
-All key hyperparameters are defined as module-level constants at the top of each script:
+All key hyperparameters are centralised in `params.py`. Edit that file to change any of the values below; every script imports from it.
 
-| Parameter | Location | Default | Description |
-|-----------|----------|---------|-------------|
-| `TARGET_HZ` | `preprocessing.py` | 64 | Target sampling rate after resampling |
-| `WINDOW_SEC` | `preprocessing.py` | 5 | Window duration in seconds |
-| `MIN_OVERLAP` / `MAX_OVERLAP` | `preprocessing.py` | 0.50 / 0.85 | Overlap bounds for adaptive windowing |
-| `TARGET_CLASS_RATIO` | `preprocessing.py` | 0.85 | Target minority-to-majority window ratio |
-| `LATENT_DIM` | `feature_extraction.py` | 8 | Encoder latent dimensionality |
-| `TARGET_DOMAIN` | `feature_extraction.py` | `wearpd` | Reference domain for CORAL and MMD |
-| `RANDOM_STATE` | all scripts | 42 | Global random seed |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `TARGET_HZ` | 64 | Target sampling rate after resampling |
+| `WINDOW_SEC` | 5 | Window duration in seconds |
+| `MIN_OVERLAP` / `MAX_OVERLAP` | 0.50 / 0.85 | Overlap bounds for adaptive windowing |
+| `TARGET_CLASS_RATIO` | 0.85 | Target minority-to-majority window ratio |
+| `LATENT_DIM` | 8 | Encoder latent dimensionality |
+| `TARGET_DOMAIN` | `wearpd` | Reference domain for CORAL and MMD |
+| `RANDOM_STATE` | 42 | Global random seed |
 
 ---
 

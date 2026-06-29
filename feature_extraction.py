@@ -19,21 +19,19 @@ from sklearn.model_selection import train_test_split
 from train import train_autoencoder, train_classifier
 
 # ── Config ────────────────────────────────────────────────────────────────────
+from params import TARGET_HZ, LATENT_DIM, TARGET_DOMAIN, RANDOM_STATE
+
 DATA_PATH       = "data/preprocessed_data/"
 CHECKPOINT_PATH = "models/"
 RESULTS_PATH    = "results/"
-RANDOM_STATE    = 42
-FS              = 64
+CORAL_REG       = 1e-2              # regularisation for CORAL covariance
+MIN_CORAL_SAMPLES = 8               # minimum samples per domain for CORAL
 
 def set_seeds(seed: int):
     random.seed(seed)
     np.random.seed(seed)
     tf.random.set_seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
-LATENT_DIM      = 8
-TARGET_DOMAIN   = "wearpd"          # CORAL / MMD target
-CORAL_REG       = 1e-2              # regularisation for CORAL covariance
-MIN_CORAL_SAMPLES = 8               # minimum samples per domain for CORAL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -275,7 +273,7 @@ def ensure_validation_domain_coverage(s_train, s_val, seed=RANDOM_STATE):
 # Handcrafted features
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _bandpass(signal, lo=0.03, hi=1.0, fs=FS, order=2):
+def _bandpass(signal, lo=0.03, hi=1.0, fs=TARGET_HZ, order=2):
     nyq = 0.5 * fs
     lo_n = np.clip(lo / nyq, 1e-5, 0.99)
     hi_n = np.clip(hi / nyq, lo_n + 1e-5, 0.99)
@@ -285,7 +283,7 @@ def _bandpass(signal, lo=0.03, hi=1.0, fs=FS, order=2):
     return filtfilt(b, a, signal)
 
 
-def stance_features(window, fs=FS):
+def stance_features(window, fs=TARGET_HZ):
     acc_ml = _bandpass(window[:, 1], fs=fs)
     acc_ap = _bandpass(window[:, 2], fs=fs)
     cov    = np.cov(acc_ap, acc_ml)
@@ -300,7 +298,7 @@ def stance_features(window, fs=FS):
     return np.array([sway, lat_dom, p_sway, p_trem], dtype=np.float32)
 
 
-def walking_features(window, fs=FS):
+def walking_features(window, fs=TARGET_HZ):
     acc_v   = window[:, 0]
     acc_ap  = window[:, 2]
     jerk    = np.linalg.norm(np.diff(window[:, :3], axis=0) * fs, axis=1)

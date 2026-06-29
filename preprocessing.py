@@ -8,16 +8,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # --- CONFIGURATION ---
+from params import TARGET_HZ, WINDOW_SEC, MIN_OVERLAP, MAX_OVERLAP, TARGET_CLASS_RATIO
+
 SF_DICT = {"fog_star": 60.0, "omnia_park": 90.0, "pd_phone": 200.0, "wearpd": 100.0, "kiel": 200.0}
 DATASETS = ["fog_star", "omnia_park", "pd_phone", "wearpd", "kiel"]
 SENSOR_COLS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
-TARGET_HZ = 64
-WINDOW_SEC = 5
-
-# Adaptive Windowing Parameters
-MIN_OVERLAP = 0.5
-MAX_OVERLAP = 0.85
-TARGET_CLASS_RATIO = 0.85
 
 # Subject to use for the standalone preprocessing PNG figures (set to None to skip)
 VIZ_SUBJECT = ("wearpd", "wpd006")

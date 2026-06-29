@@ -16,11 +16,11 @@ from sklearn.metrics import (
 from sklearn.feature_selection import VarianceThreshold, RFE
 from sklearn.preprocessing import StandardScaler
 
+from params import LATENT_DIM, RANDOM_STATE
+
 CHECKPOINT_PATH = "models/"
 RESULTS_PATH    = "results/"
-LATENT_DIM      = 8
 FEATURE_PREFIX  = "train_features_enriched_"
-RANDOM_STATE    = 42
 
 def set_seeds(seed: int):
     random.seed(seed)

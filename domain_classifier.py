@@ -21,11 +21,11 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.svm import SVC
 
+from params import LATENT_DIM, RANDOM_STATE
+
 CHECKPOINT_PATH = "models/"
 RESULTS_PATH    = "results/"
-LATENT_DIM      = 8
 LATENT_BLOCK    = 4 * LATENT_DIM   # 32 dims
-RANDOM_STATE    = 42
 
 # DA variants to compare
 DA_VARIANTS = ["baseline", "coral", "mmd"]
