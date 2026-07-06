@@ -8,7 +8,7 @@ from keras.layers import (
 @tf.keras.utils.register_keras_serializable()
 class CnnGru(tf.keras.Model):
 
-    def __init__(self, input_shape=(640, 6), n_classes=4, latent_dim=8, **kwargs):
+    def __init__(self, input_shape=(320, 6), n_classes=4, latent_dim=8, **kwargs):
         super().__init__(**kwargs)
         self.input_shape_spec = input_shape
         self.n_classes  = n_classes
@@ -57,12 +57,12 @@ class CnnGru(tf.keras.Model):
 
 @tf.keras.utils.register_keras_serializable()
 class ImuEncoder(tf.keras.Model):
-    def __init__(self, input_shape=(640, 6), latent_dim = 8, mask_prob=0.3, **kwargs):
+    def __init__(self, input_shape=(320, 6), latent_dim = 8, mask_prob=0.3, **kwargs):
         super().__init__(**kwargs)
         self.input_shape_spec = input_shape
         self.latent_dim  = latent_dim
         self.mask_prob   = mask_prob
-        self.seq_len     = input_shape[0]          # 640
+        self.seq_len     = input_shape[0]          # 320
         self.n_channels  = input_shape[1]          # 6
         self.compressed  = self.seq_len
 
@@ -72,9 +72,9 @@ class ImuEncoder(tf.keras.Model):
         self.conv2 = Conv1D(32, kernel_size=3, strides=1, activation="relu", padding="same")
         self.bn2   = BatchNormalization()
 
-        # GRU processes compressed sequence (seq_len/4 timesteps)
-        self.gru        = GRU(32, return_sequences=True)   # keep sequence for decoder
-        self.global_avg = GlobalAveragePooling1D()          # for latent extraction
+        # GRU 
+        self.gru        = GRU(32, return_sequences=True)   
+        self.global_avg = GlobalAveragePooling1D()         
         self.dropout    = Dropout(0.3)
 
         self.latent_feat = Dense(latent_dim, activation="linear", name="latent_space")
@@ -113,15 +113,15 @@ class ImuEncoder(tf.keras.Model):
             enc = self.dropout(enc)
 
         # Latent vector from pooled sequence
-        pooled = self.global_avg(enc)                  # (batch, 64)
-        latent = self.latent_feat(pooled)               # (batch, 16)
+        pooled = self.global_avg(enc)                 
+        latent = self.latent_feat(pooled)               
 
         # Decode from latent
-        x_dec = self.dec_dense(latent)                 # (batch, compressed*64)
-        x_dec = self.dec_reshape(x_dec)               # (batch, compressed, 64)
-        x_dec = self.deconv1(x_dec)                   # (batch, seq_len/2, 64)
-        x_dec = self.deconv2(x_dec)                   # (batch, seq_len, 32)
-        return self.out_layer(x_dec)                  # (batch, seq_len, 6)
+        x_dec = self.dec_dense(latent)                
+        x_dec = self.dec_reshape(x_dec)               
+        x_dec = self.deconv1(x_dec)                   
+        x_dec = self.deconv2(x_dec)                   
+        return self.out_layer(x_dec)                 
 
     def get_latent(self, inputs, training=False):
         enc    = self._encode(inputs, training=training)
